@@ -65,6 +65,8 @@ try {
   }
   await application.evaluate(({ BrowserWindow }) => {
     const contents = BrowserWindow.getAllWindows()[0].webContents;
+    contents.send('transcript:update', { channel: 'system', text: '问题第一段', final: true });
+    contents.send('transcript:update', { channel: 'system', text: '问题第二段', final: true });
     contents.send('answer:started', { source: 'test' });
     contents.send('answer:token', { token: '第一题的建议回答会继续保留。' });
     contents.send('answer:done', { answer: '第一题的建议回答会继续保留。' });
@@ -72,6 +74,9 @@ try {
     contents.send('answer:token', { token: '第二题正在通过流式事件追加。' });
     contents.send('answer:done', { answer: '第二题正在通过流式事件追加。' });
   });
+  await page.locator('.transcript-item.system .text').first().waitFor();
+  const transcriptLine = await page.locator('.transcript-item.system .text').first().textContent();
+  if (transcriptLine !== '问题第一段问题第二段') throw new Error(`Transcript segments were not merged: ${transcriptLine}`);
   await page.locator('.answer-item').nth(1).getByText('第二题正在通过流式事件追加。').waitFor();
   if (await page.locator('.answer-item').count() !== 2) throw new Error('Previous answers must remain visible');
   await page.locator('.answer-item').first().getByText('第一题的建议回答会继续保留。').waitFor();

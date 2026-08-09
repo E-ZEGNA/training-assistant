@@ -134,10 +134,11 @@ input::placeholder, textarea::placeholder { color: #99a39e; }
 .panel-heading { height: 30px; display: flex; align-items: flex-start; justify-content: space-between; }
 .panel-heading span { font-size: 10px; color: var(--muted); line-height: 20px; }
 .transcript-list { height: 230px; overflow-y: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0; }
-.transcript-item { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 9px; padding: 8px 5px; font-size: 12px; line-height: 1.55; }
+.transcript-item { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 9px; min-width: 0; padding: 8px 5px; font-size: 12px; line-height: 1.55; }
 .transcript-item .speaker { color: var(--green); font-size: 10px; font-weight: 700; padding-top: 2px; }
 .transcript-item.mic .speaker { color: var(--amber); }
 .transcript-item.partial { color: var(--muted); }
+.transcript-item .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .answer-output { min-height: 170px; max-height: 280px; overflow-y: auto; border: 1px solid #ccd8d2; border-left: 4px solid var(--green); border-radius: 6px; background: var(--surface); box-shadow: var(--shadow); font-size: 14px; line-height: 1.72; }
 .answer-item { padding: 14px 17px 16px; }

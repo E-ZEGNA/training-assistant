@@ -19,7 +19,10 @@ const state = {
   currentAnswerNode: null,
   captures: new Map(),
   partialNodes: new Map(),
+  finalNodes: new Map(),
 };
+
+const TRANSCRIPT_MERGE_WINDOW_MS = 1800;
 
 function refreshIcons() {
   window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
@@ -181,6 +184,7 @@ function stopCaptures() {
 
 function resetMeetingUi() {
   state.partialNodes.clear();
+  state.finalNodes.clear();
   state.answerCount = 0;
   state.currentAnswerNode = null;
   elements['transcript-list'].innerHTML = '<div class="empty-state"><i data-lucide="waves"></i><span>等待面试官声音</span></div>';
@@ -245,6 +249,30 @@ function renderTranscript(event) {
   empty?.remove();
   const channel = event.channel === 'mic' ? 'mic' : 'system';
   let node = state.partialNodes.get(channel);
+  const text = String(event.text ?? '').trim();
+  if (!text) return;
+  const previousFinal = state.finalNodes.get(channel);
+  const shouldMerge = event.final && previousFinal
+    && Date.now() - previousFinal.at <= TRANSCRIPT_MERGE_WINDOW_MS;
+  if (event.final && shouldMerge) {
+    node = previousFinal.node;
+    const previousText = node.querySelector('.text').textContent;
+    const partialNode = state.partialNodes.get(channel);
+    if (partialNode && partialNode !== node) partialNode.remove();
+    if (previousText === text) {
+      node.title = previousText;
+      state.finalNodes.set(channel, { node, at: Date.now() });
+      state.partialNodes.delete(channel);
+      return;
+    }
+    const separator = /[\u4e00-\u9fff]$/.test(previousText) && /^[\u4e00-\u9fff]/.test(text) ? '' : ' ';
+    node.querySelector('.text').textContent = `${previousText}${separator}${text}`;
+    node.title = node.querySelector('.text').textContent;
+    state.finalNodes.set(channel, { node, at: Date.now() });
+    state.partialNodes.delete(channel);
+    elements['transcript-list'].scrollTop = elements['transcript-list'].scrollHeight;
+    return;
+  }
   if (!node) {
     node = document.createElement('div');
     node.className = `transcript-item ${channel} partial`;
@@ -253,10 +281,12 @@ function renderTranscript(event) {
     state.partialNodes.set(channel, node);
   }
   node.querySelector('.speaker').textContent = channel === 'mic' ? '我' : '面试官';
-  node.querySelector('.text').textContent = event.text;
+  node.querySelector('.text').textContent = text;
+  node.title = text;
   if (event.final) {
     node.classList.remove('partial');
     state.partialNodes.delete(channel);
+    state.finalNodes.set(channel, { node, at: Date.now() });
   }
   while (elements['transcript-list'].children.length > 80) elements['transcript-list'].firstElementChild.remove();
   elements['transcript-list'].scrollTop = elements['transcript-list'].scrollHeight;
