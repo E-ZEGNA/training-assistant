@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+data/
+.env
+*.log
+coverage/
+reports/
+deploy/server.env
+examples/master-pack*.md
+student/native/bin/
+student/native/vendor/

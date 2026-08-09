@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self' blob:" />
+    <title>面试助教</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="titlebar">
+      <div class="brand">
+        <span class="brand-mark"><i data-lucide="audio-lines"></i></span>
+        <div>
+          <h1>面试助教</h1>
+          <span id="header-status" class="header-status">待连接</span>
+        </div>
+      </div>
+      <div class="window-actions">
+        <button id="minimize-button" class="icon-button" title="最小化" aria-label="最小化"><i data-lucide="minus"></i></button>
+        <button id="hide-button" class="icon-button" title="隐藏窗口" aria-label="隐藏窗口"><i data-lucide="eye-off"></i></button>
+      </div>
+    </header>
+
+    <main>
+      <section id="setup-view" class="setup-view">
+        <div class="section-heading">
+          <span class="step-index">01</span>
+          <div><h2>服务与激活</h2><p id="connection-summary">尚未连接机构服务</p></div>
+        </div>
+        <div class="form-grid">
+          <label class="field full-width">
+            <span>服务地址</span>
+            <div class="input-action-row">
+              <input id="server-url" type="url" spellcheck="false" autocomplete="off" />
+              <button id="test-server" class="secondary-button"><i data-lucide="radio"></i><span>测试</span></button>
+            </div>
+          </label>
+          <label id="activation-field" class="field full-width">
+            <span>激活码</span>
+            <div class="input-action-row">
+              <input id="activation-code" type="password" autocomplete="one-time-code" placeholder="输入机构发放的激活码" />
+              <button id="activate-button" class="secondary-button"><i data-lucide="key-round"></i><span>激活</span></button>
+            </div>
+          </label>
+          <div id="activated-row" class="activated-row hidden">
+            <div><i data-lucide="badge-check"></i><span>已激活</span></div>
+            <button id="deactivate-button" class="text-button">重新激活</button>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="section-heading">
+          <span class="step-index">02</span>
+          <div><h2>本场信息</h2><p>内容仅用于本次会话</p></div>
+        </div>
+        <label class="field full-width">
+          <span>补充包</span>
+          <textarea id="supplement" maxlength="30000" placeholder="目标岗位、JD、这次要重点强调的项目或事实"></textarea>
+          <span id="supplement-count" class="field-meta">0 / 30000</span>
+        </label>
+
+        <div class="setting-row">
+          <div class="setting-label"><i data-lucide="monitor-speaker"></i><div><strong>系统音频</strong><span>默认设备</span></div></div>
+          <span class="state-chip active">开启</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><i data-lucide="mic"></i><div><strong>麦克风</strong><span>学员语音</span></div></div>
+          <label class="switch"><input id="microphone-enabled" type="checkbox" /><span></span></label>
+        </div>
+        <div class="setting-row hotkey-row">
+          <div class="setting-label"><i data-lucide="command"></i><div><strong>生成答案</strong><span>全局快捷键</span></div></div>
+          <button id="hotkey-recorder" class="hotkey-button">Ctrl + 1</button>
+        </div>
+
+        <p id="start-requirement" class="start-requirement" role="status">正在检查开始条件</p>
+        <button id="start-button" class="primary-button" aria-describedby="start-requirement" disabled><i data-lucide="play"></i><span>开始面试</span></button>
+      </section>
+
+      <section id="meeting-view" class="meeting-view hidden">
+        <div class="meeting-toolbar">
+          <div class="live-state"><span class="live-dot"></span><div><strong>面试进行中</strong><span id="audio-state">正在启动音频</span></div></div>
+          <button id="stop-button" class="danger-button"><i data-lucide="square"></i><span>结束</span></button>
+        </div>
+
+        <div class="transcript-section">
+          <div class="panel-heading"><h2>现场转写</h2><span id="transcript-state">等待声音</span></div>
+          <div id="transcript-list" class="transcript-list" aria-live="polite">
+            <div class="empty-state"><i data-lucide="waves"></i><span>等待面试官声音</span></div>
+          </div>
+        </div>
+
+        <div class="answer-section">
+          <div class="panel-heading"><h2>建议回答</h2><span id="answer-state">就绪</span></div>
+          <div id="answer-output" class="answer-output" aria-live="polite">
+            <div class="empty-state"><i data-lucide="sparkles"></i><span>答案将在这里出现</span></div>
+          </div>
+          <button id="answer-button" class="primary-button answer-button"><i data-lucide="sparkles"></i><span>生成答案</span><kbd id="answer-hotkey-label">Ctrl + 1</kbd></button>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden" role="status"></div>
+    <script src="vendor/lucide.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

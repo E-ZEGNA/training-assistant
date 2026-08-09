@@ -1,0 +1,18 @@
+{
+  "name": "@interview-assistant/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup:dev": "node scripts/init-dev.mjs",
+    "dev": "node --env-file-if-exists=.env --watch src/index.js",
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "test": "node --test test/*.test.js",
+    "smoke:codex": "node --env-file-if-exists=.env scripts/smoke-codex.mjs",
+    "publish-master": "node scripts/publish-master.mjs"
+  },
+  "dependencies": {
+    "smol-toml": "^1.7.1",
+    "ws": "^8.18.3"
+  }
+}

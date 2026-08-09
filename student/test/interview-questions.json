@@ -1,0 +1,55 @@
+[
+  {
+    "id": "q01-kubernetes",
+    "text": "请介绍一下你最近负责的 Kubernetes 生产集群治理项目。你承担了什么职责，最终取得了哪些量化结果？",
+    "segments": [
+      { "voice": "zh", "text": "请介绍一下你最近负责的" },
+      { "voice": "en", "text": "Kubernetes" },
+      { "voice": "zh", "text": "生产集群治理项目。你承担了什么职责，最终取得了哪些量化结果？" }
+    ]
+  },
+  {
+    "id": "q02-p99-observability",
+    "text": "如果服务发布后 P99 latency 从三百毫秒升高到两秒，你会如何结合 Prometheus、OpenTelemetry 和 logs 定位问题？",
+    "segments": [
+      { "voice": "zh", "text": "如果服务发布后" },
+      { "voice": "en", "text": "P ninety-nine latency" },
+      { "voice": "zh", "text": "从三百毫秒升高到两秒，你会如何结合" },
+      { "voice": "en", "text": "Prometheus, Open Telemetry, and logs" },
+      { "voice": "zh", "text": "定位问题？" }
+    ]
+  },
+  {
+    "id": "q03-gpu-inference",
+    "text": "在 GPU inference platform 中遇到 CUDA out of memory，你如何区分模型问题、流量问题和 GPU 调度问题？",
+    "segments": [
+      { "voice": "zh", "text": "在" },
+      { "voice": "en", "text": "GPU inference platform" },
+      { "voice": "zh", "text": "中遇到" },
+      { "voice": "en", "text": "CUDA out of memory" },
+      { "voice": "zh", "text": "，你如何区分模型问题、流量问题和" },
+      { "voice": "en", "text": "GPU" },
+      { "voice": "zh", "text": "调度问题？" }
+    ]
+  },
+  {
+    "id": "q04-k8s-autoscaling",
+    "text": "请比较 Horizontal Pod Autoscaler 和 Vertical Pod Autoscaler 的适用场景，以及它们同时启用时可能产生的冲突。",
+    "segments": [
+      { "voice": "zh", "text": "请比较" },
+      { "voice": "en", "text": "Horizontal Pod Autoscaler and Vertical Pod Autoscaler" },
+      { "voice": "zh", "text": "的适用场景，以及它们同时启用时可能产生的冲突。" }
+    ]
+  },
+  {
+    "id": "q05-redis-incident",
+    "text": "假设 Redis connection pool 配置错误导致大量 timeout，请说明你的止损、回滚、根因定位和防复发方案。",
+    "segments": [
+      { "voice": "zh", "text": "假设" },
+      { "voice": "en", "text": "Redis connection pool" },
+      { "voice": "zh", "text": "配置错误导致大量" },
+      { "voice": "en", "text": "timeout" },
+      { "voice": "zh", "text": "，请说明你的止损、回滚、根因定位和防复发方案。" }
+    ]
+  }
+]

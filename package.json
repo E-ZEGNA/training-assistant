@@ -1,0 +1,23 @@
+{
+  "name": "interview-training-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "server",
+    "student"
+  ],
+  "scripts": {
+    "install:all": "npm install --workspaces",
+    "dev:server": "npm --workspace server run dev",
+    "dev:student": "npm --workspace student run dev",
+    "test": "npm --workspace server test && npm --workspace student test",
+    "build:student": "npm --workspace student run dist:win",
+    "publish:master": "npm --workspace server run publish-master --"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
+  }
+}

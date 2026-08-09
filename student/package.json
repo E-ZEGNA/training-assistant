@@ -1,0 +1,79 @@
+{
+  "name": "@interview-assistant/student",
+  "version": "0.1.2",
+  "private": true,
+  "description": "Internal real-time interview training assistant",
+  "author": "Internal Training",
+  "main": "electron/main.js",
+  "scripts": {
+    "prepare:assets": "node scripts/prepare-assets.js",
+    "prepare:native": "powershell -NoProfile -ExecutionPolicy Bypass -File native/build.ps1",
+    "predev": "npm run prepare:assets && npm run prepare:native",
+    "dev": "electron .",
+    "test": "node --test test/*.test.js",
+    "test:ui": "node test/ui-smoke.mjs",
+    "test:audio": "npm run prepare:native && node test/native-audio-smoke.mjs",
+    "test:audio:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File test/generate-interview-audio.ps1",
+    "test:audio:e2e": "node test/interview-audio-e2e.mjs",
+    "predist:win": "npm run prepare:assets && npm run prepare:native",
+    "dist:win": "electron-builder --win nsis portable --x64"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "electron": "37.10.3",
+    "electron-builder": "^26.0.12",
+    "lucide": "^0.468.0"
+  },
+  "build": {
+    "appId": "cn.internal.interviewassistant",
+    "productName": "面试助教",
+    "electronDist": "../node_modules/electron/dist",
+    "asar": true,
+    "files": [
+      "electron/**/*",
+      "renderer/**/*",
+      "node_modules/ws/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "native/bin",
+        "to": "native",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true,
+      "artifactName": "Interview-Assistant-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Interview-Assistant-Portable-${version}.${ext}"
+    }
+  }
+}

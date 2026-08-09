@@ -1,0 +1,28 @@
+services:
+  interview-server:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    image: interview-assistant-server:0.1.0
+    restart: unless-stopped
+    env_file:
+      - server.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      DATA_DIR: /app/server/data
+      NODE_ENV: production
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - interview-data:/app/server/data
+    cpus: 1.0
+    mem_limit: 1g
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  interview-data:

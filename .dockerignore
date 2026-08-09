@@ -1,0 +1,10 @@
+node_modules
+student/release
+reports
+server/data
+server/.env
+deploy/server.env
+.git
+*.log
+*.png
+*.zip
