@@ -1,0 +1,56 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+
+  package-windows:
+    name: Package Windows client
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:student
+      - uses: actions/upload-artifact@v4
+        with:
+          name: interview-assistant-${{ github.ref_name }}
+          path: |
+            student/release/Interview-Assistant-Setup-*.exe
+            student/release/Interview-Assistant-Portable-*.exe
+          if-no-files-found: error
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem -LiteralPath student/release -Filter 'Interview-Assistant-*.exe' | Select-Object -ExpandProperty FullName
+          gh release create $env:GITHUB_REF_NAME $assets --repo $env:GITHUB_REPOSITORY --title "面试助教 $env:GITHUB_REF_NAME" --generate-notes
