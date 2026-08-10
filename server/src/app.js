@@ -4,7 +4,7 @@ import { bearerToken, issueStudentToken, requireAdmin, verifyStudentDevice, veri
 import { StudentBindingStore } from './binding-store.js';
 import { getClientIp } from './client-ip.js';
 import { MasterPackStore } from './crypto-store.js';
-import { generateInterviewAnswer } from './llm.js';
+import { generateInterviewAnswer, llmErrorDetails } from './llm.js';
 import { json, noContent, RateLimiter, readJson, route } from './http-utils.js';
 import { SessionStore } from './sessions.js';
 
@@ -132,15 +132,21 @@ export function createApplication(config) {
       if (req.method === 'POST' && answerParams) {
         const claims = authStudent(req, config, bindingStore);
         if (!claims) return json(res, 401, { error: 'unauthorized' });
-        if (!answerLimiter.take(claims.sub)) return json(res, 429, { error: 'answer_rate_limited' });
         const session = sessionStore.get(answerParams.id, claims.sub);
         if (!session) return json(res, 404, { error: 'session_not_found' });
         await readJson(req, 2048);
-        const transcriptContext = sessionStore.context(session);
-        if (!transcriptContext.text.trim()) return json(res, 409, { error: 'no_transcript_yet' });
         if (session.answerInProgress) return json(res, 409, { error: 'answer_in_progress' });
-        const master = await masterStore.get(session.studentId);
+        if (!answerLimiter.take(claims.sub)) return json(res, 429, { error: 'answer_rate_limited' });
+        const transcriptContext = sessionStore.answerContext(session);
+        if (!transcriptContext.text.trim()) return json(res, 409, { error: 'no_transcript_yet' });
         session.answerInProgress = true;
+        let master;
+        try {
+          master = await masterStore.get(session.studentId);
+        } catch (error) {
+          session.answerInProgress = false;
+          throw error;
+        }
         const controller = new AbortController();
         res.once('close', () => {
           if (!res.writableEnded) controller.abort();
@@ -155,13 +161,24 @@ export function createApplication(config) {
             signal: controller.signal,
             onToken: (token) => sendSse(res, 'token', { token }),
             onReplace: (text) => sendSse(res, 'replace', { text }),
+            onRetry: ({ attempt, maxAttempts, delayMs, error }) => {
+              log('answer_retrying', {
+                sessionId: session.id,
+                studentId: claims.sub,
+                attempt,
+                maxAttempts,
+                delayMs,
+                ...error,
+              });
+              sendSse(res, 'retry', { attempt, maxAttempts });
+            },
           });
           sessionStore.markAnswered(session, transcriptContext.revision);
           log('answer_generated', { sessionId: session.id, studentId: claims.sub, answerCharacters: answer.length });
           sendSse(res, 'done', { ok: true });
         } catch (error) {
           if (error?.name !== 'AbortError') {
-            log('answer_failed', { sessionId: session.id, studentId: claims.sub, error: error?.message ?? 'unknown' });
+            log('answer_failed', { sessionId: session.id, studentId: claims.sub, ...llmErrorDetails(error) });
             sendSse(res, 'error', { error: 'answer_generation_failed' });
           }
         } finally {

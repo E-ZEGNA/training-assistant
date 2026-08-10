@@ -37,6 +37,24 @@ test('answer consumes token and replacement events until done', async () => {
   });
 });
 
+test('answer forwards retry progress without starting a second request', async () => {
+  let requests = 0;
+  await withServer((_req, res) => {
+    requests += 1;
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write('event: retry\ndata: {"attempt":2,"maxAttempts":3}\n\n');
+    res.write('event: token\ndata: {"token":"重试成功"}\n\n');
+    res.end('event: done\ndata: {"ok":true}\n\n');
+  }, async (baseUrl) => {
+    const client = clientFor(baseUrl);
+    const retries = [];
+    client.on('answer-retry', (event) => retries.push(event));
+    assert.equal(await client.answer(), '重试成功');
+    assert.equal(requests, 1);
+    assert.deepEqual(retries, [{ attempt: 2, maxAttempts: 3 }]);
+  });
+});
+
 test('answer rejects a stream that closes without done', async () => {
   await withServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });

@@ -217,3 +217,52 @@ test('failed answer generation does not advance the answered transcript boundary
     await rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test('a concurrent answer request is rejected while new transcript remains queued', async () => {
+  const { application, baseUrl, dataDir } = await fixture();
+  try {
+    await application.masterStore.put({ studentId: 'student-1', text: '用于并发回答边界测试的主线程资料。'.repeat(4), version: 'v1' });
+    const activation = await fetch(`${baseUrl}/v1/student/activate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: 'activate-me', deviceId: 'device-12345678' }),
+    });
+    const { token } = await activation.json();
+    const headers = { authorization: `Bearer ${token}`, 'x-device-id': 'device-12345678', 'content-type': 'application/json' };
+    const sessionResponse = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers, body: JSON.stringify({ supplement: '' }),
+    });
+    const sessionInfo = await sessionResponse.json();
+    const session = application.sessionStore.get(sessionInfo.id, 'student-1');
+    application.sessionStore.addTranscript(session, 'system', { utteranceId: 'question-1', text: '正在回答的问题', final: true });
+    const snapshot = application.sessionStore.answerContext(session);
+    let releaseMaster;
+    let markMasterReadStarted;
+    const masterReadStarted = new Promise((resolve) => { markMasterReadStarted = resolve; });
+    const masterGate = new Promise((resolve) => { releaseMaster = resolve; });
+    application.masterStore.get = async () => {
+      markMasterReadStarted();
+      await masterGate;
+      return { text: '用于并发回答边界测试的主线程资料。'.repeat(4), version: 'v1' };
+    };
+    const firstResponsePromise = fetch(`${baseUrl}/v1/sessions/${sessionInfo.id}/answer`, {
+      method: 'POST', headers, body: '{}',
+    });
+    await masterReadStarted;
+    application.sessionStore.addTranscript(session, 'system', { utteranceId: 'question-2', text: '重试期间到达的新问题', final: true });
+
+    const concurrentResponse = await fetch(`${baseUrl}/v1/sessions/${sessionInfo.id}/answer`, {
+      method: 'POST', headers, body: '{}',
+    });
+    assert.equal(concurrentResponse.status, 409);
+    assert.equal((await concurrentResponse.json()).error, 'answer_in_progress');
+    assert.equal(application.sessionStore.answerContext(session).text, snapshot.text);
+    assert.match(application.sessionStore.context(session).text, /重试期间到达的新问题/);
+    releaseMaster();
+    const firstResponse = await firstResponsePromise;
+    assert.equal(firstResponse.status, 200);
+    assert.match(await firstResponse.text(), /answer_generation_failed/);
+  } finally {
+    await application.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});

@@ -201,6 +201,94 @@ test('LLM retries a transient failure only before the first output token', async
   assert.equal(calls, 2);
 });
 
+test('LLM retries fetch failures and reports the underlying network error', async (context) => {
+  let calls = 0;
+  const retries = [];
+  const encoder = new TextEncoder();
+  context.mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    if (calls === 1) {
+      const cause = Object.assign(new Error('socket reset'), { code: 'ECONNRESET' });
+      const failure = new TypeError('fetch failed');
+      failure.cause = cause;
+      throw failure;
+    }
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"网络重试成功"}\n\n'));
+        controller.close();
+      },
+    }), { status: 200 });
+  });
+  const answer = await generateInterviewAnswer({
+    config: { llm: { provider: 'responses-api', apiKey: 'test', baseUrl: 'https://gateway.example/v1', model: 'test', reasoningEffort: 'low', contextWindowTokens: 1_000_000 } },
+    master: { text: '主线程证据'.repeat(30) },
+    session: { supplement: '', answerHistory: [] },
+    transcriptContext: '介绍项目',
+    onRetry: (event) => retries.push(event),
+  });
+  assert.equal(answer, '网络重试成功');
+  assert.equal(calls, 2);
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0].attempt, 2);
+  assert.equal(retries[0].maxAttempts, 3);
+  assert.equal(retries[0].error.code, 'ECONNRESET');
+});
+
+test('LLM retries an empty successful upstream stream', async (context) => {
+  let calls = 0;
+  const encoder = new TextEncoder();
+  context.mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    const body = calls === 1
+      ? ''
+      : 'data: {"type":"response.output_text.delta","delta":"空流重试成功"}\n\n';
+    return new Response(new ReadableStream({
+      start(controller) {
+        if (body) controller.enqueue(encoder.encode(body));
+        controller.close();
+      },
+    }), { status: 200 });
+  });
+  const answer = await generateInterviewAnswer({
+    config: { llm: { provider: 'responses-api', apiKey: 'test', baseUrl: 'https://gateway.example/v1', model: 'test', reasoningEffort: 'low', contextWindowTokens: 1_000_000 } },
+    master: { text: '主线程证据'.repeat(30) },
+    session: { supplement: '', answerHistory: [] },
+    transcriptContext: '介绍项目',
+  });
+  assert.equal(answer, '空流重试成功');
+  assert.equal(calls, 2);
+});
+
+test('LLM does not retry after an output token has been emitted', async (context) => {
+  let calls = 0;
+  const retries = [];
+  const tokens = [];
+  const encoder = new TextEncoder();
+  context.mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    return new Response(new ReadableStream({
+      async start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"半截回答"}\n\n'));
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const failure = Object.assign(new Error('socket reset'), { code: 'ECONNRESET' });
+        controller.error(failure);
+      },
+    }), { status: 200 });
+  });
+  await assert.rejects(() => generateInterviewAnswer({
+    config: { llm: { provider: 'responses-api', apiKey: 'test', baseUrl: 'https://gateway.example/v1', model: 'test', reasoningEffort: 'low', contextWindowTokens: 1_000_000 } },
+    master: { text: '主线程证据'.repeat(30) },
+    session: { supplement: '', answerHistory: [] },
+    transcriptContext: '介绍项目',
+    onToken: (token) => tokens.push(token),
+    onRetry: (event) => retries.push(event),
+  }), /socket reset/);
+  assert.equal(calls, 1);
+  assert.deepEqual(tokens, ['半截回答']);
+  assert.deepEqual(retries, []);
+});
+
 test('verbatim output is replaced after the copied prefix is reclaimed', async (context) => {
   const master = '不可逐字输出的机构内部资料'.repeat(20);
   const copied = master.slice(0, 130);
@@ -443,6 +531,29 @@ test('SessionStore keeps transcription that arrives after the answer click', asy
     const remaining = store.context(session).text;
     assert.doesNotMatch(remaining, /点击前的问题/);
     assert.match(remaining, /点击后新说的话/);
+  } finally {
+    store.close();
+  }
+});
+
+test('SessionStore pins a failed answer snapshot while newer dialogue waits', async () => {
+  const store = new SessionStore(
+    { maxSupplementChars: 30_000, sessionTtlMs: 60_000, sttProvider: 'mock', seedAsr: {} },
+    { get: async () => ({ text: '演示主线程资料' }) },
+  );
+  try {
+    const session = await store.create('student-1', '');
+    store.addTranscript(session, 'system', { utteranceId: 'first', text: '第一个问题', final: true });
+    const firstAttempt = store.answerContext(session);
+    store.addTranscript(session, 'system', { utteranceId: 'second', text: '重试期间的新问题', final: true });
+    const retryAttempt = store.answerContext(session);
+    assert.deepEqual(retryAttempt, firstAttempt);
+    assert.doesNotMatch(retryAttempt.text, /新问题/);
+
+    store.markAnswered(session, firstAttempt.revision);
+    const nextAttempt = store.answerContext(session);
+    assert.doesNotMatch(nextAttempt.text, /第一个问题/);
+    assert.match(nextAttempt.text, /重试期间的新问题/);
   } finally {
     store.close();
   }

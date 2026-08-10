@@ -50,6 +50,7 @@ export class SessionStore {
       clientSockets: new Map(),
       answerHistory: [],
       answerInProgress: false,
+      pendingAnswerContext: null,
       transcriptRevision: 0,
       answeredRevision: 0,
       hotwords: buildHotwords(master.text, supplement),
@@ -111,8 +112,18 @@ export class SessionStore {
     return { text, revision: session.transcriptRevision };
   }
 
+  answerContext(session) {
+    if (session.pendingAnswerContext) return session.pendingAnswerContext;
+    const context = this.context(session);
+    if (context.text.trim()) session.pendingAnswerContext = context;
+    return context;
+  }
+
   markAnswered(session, revision) {
-    if (Number.isSafeInteger(revision)) session.answeredRevision = Math.max(session.answeredRevision, revision);
+    if (Number.isSafeInteger(revision)) {
+      session.answeredRevision = Math.max(session.answeredRevision, revision);
+      if (session.pendingAnswerContext?.revision <= session.answeredRevision) session.pendingAnswerContext = null;
+    }
   }
 
   end(id, studentId) {
@@ -126,6 +137,7 @@ export class SessionStore {
     session.partialByUtterance.clear();
     session.answerHistory = [];
     session.answerInProgress = false;
+    session.pendingAnswerContext = null;
     session.transcriptRevision = 0;
     session.answeredRevision = 0;
     this.sessions.delete(id);
