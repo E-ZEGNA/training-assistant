@@ -45,11 +45,11 @@ test('system audio uses the packaged WASAPI helper instead of Chromium display c
   assert.doesNotMatch(renderer, /getDisplayMedia/);
 });
 
-test('transcripts remain visible and answer rendering is frame-batched', () => {
+test('transcripts stay on one visual line and answer rendering is frame-batched', () => {
   const renderer = read('renderer/app.js');
   const styles = read('renderer/styles.css');
   assert.doesNotMatch(renderer, /children\.length > 80/);
   assert.match(renderer, /event\.utteranceId/);
   assert.match(renderer, /requestAnimationFrame/);
-  assert.match(styles, /\.transcript-item \.text \{[^}]*white-space: pre-wrap;[^}]*overflow-wrap: anywhere;/s);
+  assert.match(styles, /\.transcript-item \.text \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
 });

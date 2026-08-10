@@ -198,12 +198,6 @@ export class SeedAsrStream extends EventEmitter {
         });
       }
 
-      if (this.utteranceStates.size > 256) {
-        for (const [identity, state] of this.utteranceStates) {
-          if (state.final) this.utteranceStates.delete(identity);
-          if (this.utteranceStates.size <= 192) break;
-        }
-      }
     } catch (error) {
       this.emit('error', error);
     }

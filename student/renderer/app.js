@@ -302,25 +302,19 @@ function renderTranscript(event) {
     state.transcriptSegments.push(segment);
     state.activeTranscriptSegment = segment;
   }
-  const utteranceKey = `${channel}:${event.utteranceId ?? 'current'}`;
+  const hasUtteranceId = event.utteranceId != null;
+  const utteranceKey = `${channel}:${hasUtteranceId ? event.utteranceId : 'current'}`;
   let entry = segment.entriesByKey.get(utteranceKey);
-  if (entry && event.utteranceId == null && event.final && entry.final && entry.text !== text) entry = null;
-  if (!entry) {
-    const recent = [...segment.entries].reverse().find((candidate) => candidate.channel === channel);
-    if (recent && (recent.text === text || recent.text.startsWith(text) || text.startsWith(recent.text))) {
-      entry = recent;
-      segment.entriesByKey.set(utteranceKey, entry);
-    }
-  }
+  if (!hasUtteranceId && entry?.final) entry = null;
   if (!entry) {
     entry = { channel, text, final: event.final === true };
     segment.entries.push(entry);
-    const key = event.utteranceId == null && event.final ? `${utteranceKey}:${segment.entries.length}` : utteranceKey;
-    segment.entriesByKey.set(key, entry);
+    segment.entriesByKey.set(utteranceKey, entry);
   } else {
     entry.text = text;
     entry.final = event.final === true;
   }
+  if (!hasUtteranceId && entry.final) segment.entriesByKey.delete(utteranceKey);
   let block = segment.blocks.get(channel);
   if (!block) {
     const node = document.createElement('div');
@@ -332,7 +326,20 @@ function renderTranscript(event) {
     segment.blocks.set(channel, block);
   }
   const blockEntries = segment.entries.filter((candidate) => candidate.channel === channel);
-  const blockText = blockEntries.map((candidate) => candidate.text).join('');
+  const blockText = blockEntries.reduce((combined, candidate) => {
+    if (!combined) return candidate.text;
+    const leftIsCjk = /[\u3400-\u9fff]$/u.test(combined);
+    const rightIsCjk = /^[\u3400-\u9fff]/u.test(candidate.text);
+    const startsWithPunctuation = /^[\p{P}\p{S}]/u.test(candidate.text);
+    const endsWithCjkPunctuation = /[，。！？；：、）】》“”‘’]$/u.test(combined);
+    const separator = /\s$/u.test(combined)
+      || startsWithPunctuation
+      || endsWithCjkPunctuation
+      || (leftIsCjk && rightIsCjk)
+      ? ''
+      : ' ';
+    return `${combined}${separator}${candidate.text}`;
+  }, '');
   block.node.querySelector('.text').textContent = blockText;
   block.node.classList.toggle('partial', blockEntries.some((candidate) => !candidate.final));
   block.node.title = blockText;

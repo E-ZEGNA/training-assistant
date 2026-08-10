@@ -88,23 +88,7 @@ export class SessionStore {
       if (item.revision > session.answeredRevision) entries.push({ ...item, final: false });
     }
     entries.sort((left, right) => left.revision - right.revision);
-    const compacted = [];
-    for (const entry of entries) {
-      const previous = compacted.at(-1);
-      if (previous?.channel === entry.channel) {
-        if (previous.text === entry.text) {
-          if (entry.final) compacted[compacted.length - 1] = entry;
-          continue;
-        }
-        if (previous.text.startsWith(entry.text)) continue;
-        if (entry.text.startsWith(previous.text)) {
-          compacted[compacted.length - 1] = entry;
-          continue;
-        }
-      }
-      compacted.push(entry);
-    }
-    const text = compacted.map(({ channel, text: value, final }) => {
+    const text = entries.map(({ channel, text: value, final }) => {
       const speaker = channel === 'system' ? '面试官' : '学员';
       return `${speaker}${final ? '' : '（正在说）'}：${value}`;
     }).join('\n');

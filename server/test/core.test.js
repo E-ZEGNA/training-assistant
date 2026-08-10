@@ -190,6 +190,27 @@ test('Seed-ASR preserves an earlier final utterance when a later one is partial'
   ]);
 });
 
+test('Seed-ASR does not re-emit finalized utterances from large cumulative results', () => {
+  const stream = new SeedAsrStream({ endpoint: '', apiKey: '', resourceId: '', uid: 'test', hotwords: [] });
+  const transcripts = [];
+  stream.on('transcript', (event) => transcripts.push(event));
+  const utterances = Array.from({ length: 257 }, (_, index) => ({
+    text: `累计句子 ${index}`,
+    start_time: index * 100,
+    definite: true,
+  }));
+  const frame = encodeFrame({
+    type: 0x9,
+    serialization: 1,
+    payload: Buffer.from(JSON.stringify({ result: { utterances } })),
+  });
+
+  stream.handleMessage(frame);
+  assert.equal(transcripts.length, 257);
+  stream.handleMessage(frame);
+  assert.equal(transcripts.length, 257);
+});
+
 test('Seed-ASR finalizes a missing partial before a new utterance starts', () => {
   const stream = new SeedAsrStream({ endpoint: '', apiKey: '', resourceId: '', uid: 'test', hotwords: [] });
   const transcripts = [];
@@ -225,6 +246,24 @@ test('SessionStore keeps simultaneous partials until the answer snapshot revisio
     assert.ok(context.revision > 0);
     store.markAnswered(session, context.revision);
     assert.equal(store.context(session).text, '');
+  } finally {
+    store.close();
+  }
+});
+
+test('SessionStore preserves prefix-related text from distinct utterances', async () => {
+  const store = new SessionStore(
+    { maxSupplementChars: 30_000, sessionTtlMs: 60_000, sttProvider: 'mock', seedAsr: {} },
+    { get: async () => ({ text: '演示主线程资料' }) },
+  );
+  try {
+    const session = await store.create('student-1', '');
+    store.addTranscript(session, 'system', { utteranceId: 'java', text: 'Please explain Java', final: true });
+    store.addTranscript(session, 'system', { utteranceId: 'javascript', text: 'Please explain JavaScript', final: true });
+    assert.equal(
+      store.context(session).text,
+      '面试官：Please explain Java\n面试官：Please explain JavaScript',
+    );
   } finally {
     store.close();
   }

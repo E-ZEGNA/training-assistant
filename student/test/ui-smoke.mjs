@@ -93,7 +93,7 @@ try {
     contents.send('answer:done', { answer: '第二题正在通过流式事件追加。' });
     for (let index = 0; index < 105; index += 1) {
       contents.send('transcript:update', {
-        channel: 'system', utteranceId: `history-${index}`, text: `完整转写记录 ${index}：这是一段需要换行展示的较长内容。`, final: false,
+        channel: 'system', utteranceId: `history-${index}`, text: `完整转写记录 ${index}：这是一段需要保留的较长内容。`, final: false,
       });
     }
     contents.send('transcript:update', { channel: 'system', utteranceId: 'revised-utterance', text: '重复测试初稿', final: true });
@@ -127,13 +127,15 @@ try {
     const contents = BrowserWindow.getAllWindows()[0].webContents;
     contents.send('audio:status', { channel: 'system', state: 'connected' });
     contents.send('audio:status', { channel: 'mic', state: 'connected' });
-    contents.send('transcript:update', { channel: 'system', utteranceId: 'duplicate-a', text: '跨ID重复内容', final: true });
-    contents.send('transcript:update', { channel: 'system', utteranceId: 'duplicate-b', text: '跨ID重复内容', final: true });
+    contents.send('transcript:update', { channel: 'system', utteranceId: 'english-a', text: 'Please explain Java', final: true });
+    contents.send('transcript:update', { channel: 'system', utteranceId: 'english-b', text: 'Please explain JavaScript', final: true });
   });
   const transcriptWhiteSpace = await page.locator('.transcript-item .text').last().evaluate((node) => getComputedStyle(node).whiteSpace);
-  if (transcriptWhiteSpace === 'nowrap') throw new Error('Transcript text is still visually truncated');
-  const crossIdDuplicate = await page.locator('.transcript-item .text').evaluateAll((nodes) => nodes.map((node) => node.textContent).filter((text) => text.includes('跨ID重复内容')));
-  if (crossIdDuplicate.length !== 1 || crossIdDuplicate[0].split('跨ID重复内容').length - 1 !== 1) throw new Error(`Cross-ID transcript was duplicated: ${JSON.stringify(crossIdDuplicate)}`);
+  if (transcriptWhiteSpace !== 'nowrap') throw new Error('Transcript text must stay on one visual line');
+  const englishTranscript = await page.locator('.transcript-item .text').last().textContent();
+  if (!englishTranscript.includes('Please explain Java Please explain JavaScript')) {
+    throw new Error(`Distinct English utterances were lost or joined without spacing: ${englishTranscript}`);
+  }
   await page.screenshot({ path: path.join(reports, 'student-meeting-560.png') });
 
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(430, 700));
