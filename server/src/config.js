@@ -41,7 +41,15 @@ export function loadConfig(overrides = {}) {
     activationCodes: overrides.activationCodes ?? parseActivationCodes(process.env.STUDENT_ACTIVATION_CODES ?? (test ? 'test-code:test-student' : '')),
     sessionTtlMs: Number(overrides.sessionTtlMs ?? process.env.SESSION_TTL_MS ?? 6 * 60 * 60 * 1000),
     maxSupplementChars: Number(overrides.maxSupplementChars ?? process.env.MAX_SUPPLEMENT_CHARS ?? 30_000),
+    persistenceQueueLimit: Number(overrides.persistenceQueueLimit ?? process.env.PERSISTENCE_QUEUE_LIMIT ?? 1000),
+    requireStudentProvider: overrides.requireStudentProvider ?? (test ? false : process.env.REQUIRE_STUDENT_PROVIDER !== 'false'),
     sttProvider: overrides.sttProvider ?? process.env.STT_PROVIDER ?? 'seed-asr',
+    xiaomuai: {
+      baseUrl: (overrides.xiaomuaiBaseUrl ?? process.env.XIAOMUAI_BASE_URL ?? 'https://xiaomuai.cn/v1').replace(/\/$/, ''),
+      llmModel: overrides.xiaomuaiLlmModel ?? process.env.XIAOMUAI_LLM_MODEL ?? 'gpt-5.6-terra',
+      sttModel: overrides.xiaomuaiSttModel ?? process.env.XIAOMUAI_STT_MODEL ?? 'mimo-v2.5-asr',
+      timeoutMs: Number(overrides.xiaomuaiTimeoutMs ?? process.env.XIAOMUAI_TIMEOUT_MS ?? 2500),
+    },
     seedAsr: {
       apiKey: overrides.seedAsrApiKey ?? process.env.SEED_ASR_API_KEY ?? '',
       resourceId: overrides.seedAsrResourceId ?? process.env.SEED_ASR_RESOURCE_ID ?? 'volc.seedasr.sauc.duration',

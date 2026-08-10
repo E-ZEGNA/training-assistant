@@ -16,7 +16,9 @@ await mkdir(reports, { recursive: true });
 
 const envText = await readFile(path.join(projectRoot, 'server', '.env'), 'utf8');
 const activationCode = envText.match(/^STUDENT_ACTIVATION_CODES=([^:,]+):/m)?.[1];
+const xiaomuaiKey = envText.match(/^LLM_API_KEY=(.+)$/m)?.[1]?.trim();
 if (!activationCode) throw new Error('Unable to read local activation code from server/.env');
+if (!xiaomuaiKey) throw new Error('Unable to read local XiaomuAI key from server/.env');
 
 const pageErrors = [];
 const packagedExecutable = process.env.PACKAGED_EXE;
@@ -46,6 +48,13 @@ try {
   await page.locator('#activation-code').fill(activationCode);
   await page.locator('#activate-button').click();
   await page.locator('#activated-row').waitFor({ state: 'visible' });
+  if (await page.locator('#remove-provider').isVisible()) await page.locator('#remove-provider').click();
+  await page.waitForFunction(() => /XiaomuAI|Key/.test(document.getElementById('start-requirement')?.textContent ?? ''), null, { timeout: 15_000 });
+  if (!(await page.locator('#start-button').isDisabled())) throw new Error('Start button must stay disabled before XiaomuAI setup');
+  await page.locator('#provider-key').fill(xiaomuaiKey);
+  await page.locator('#save-provider').click();
+  await page.waitForFunction(() => document.getElementById('provider-key')?.value === '', null, { timeout: 15_000 });
+  await page.locator('#provider-status').getByText('大模型可用；STT 将使用 Seed-ASR').waitFor();
   await page.waitForFunction(() => document.getElementById('start-button')?.disabled === false, null, { timeout: 15_000 });
   await page.locator('#start-requirement').getByText('准备完成，可以开始面试').waitFor();
   await page.locator('#supplement').fill('本场应聘 ML Infra，重点考察 GPU 调度与训练稳定性。');

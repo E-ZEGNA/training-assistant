@@ -3,6 +3,8 @@ const api = window.interviewAPI;
 const elements = Object.fromEntries([
   'header-status', 'setup-view', 'meeting-view', 'connection-summary', 'server-url', 'test-server',
   'activation-field', 'activation-code', 'activate-button', 'activated-row', 'deactivate-button',
+  'provider-section', 'provider-status', 'provider-base-url', 'provider-key', 'provider-llm-model',
+  'provider-stt-model', 'xiaomu-model-list', 'save-provider', 'remove-provider', 'xiaomu-register',
   'supplement', 'supplement-count', 'microphone-enabled', 'hotkey-recorder', 'start-button',
   'start-requirement',
   'audio-state', 'transcript-state', 'transcript-list', 'answer-state', 'answer-output',
@@ -13,6 +15,7 @@ const state = {
   config: null,
   connected: false,
   masterPackConfigured: false,
+  provider: { configured: false },
   meeting: false,
   answerPending: false,
   answerCount: 0,
@@ -57,11 +60,13 @@ function renderConfig() {
   elements['answer-hotkey-label'].textContent = hotkey;
   elements['activation-field'].classList.toggle('hidden', state.config.activated);
   elements['activated-row'].classList.toggle('hidden', !state.config.activated);
+  elements['provider-section'].classList.toggle('hidden', !state.config.activated);
+  renderProvider();
   updateStartState();
 }
 
 function updateStartState() {
-  const ready = Boolean(state.config?.activated && state.connected && state.masterPackConfigured);
+  const ready = Boolean(state.config?.activated && state.connected && state.masterPackConfigured && state.provider.configured && state.provider.llmAvailable);
   elements['start-button'].disabled = !ready;
   elements['start-requirement'].classList.toggle('ready', ready);
   if (!state.config?.activated) {
@@ -70,8 +75,60 @@ function updateStartState() {
     elements['start-requirement'].textContent = '机构服务未连接，请点击上方“测试”';
   } else if (!state.masterPackConfigured) {
     elements['start-requirement'].textContent = '机构资料尚未就绪，请联系发布方';
+  } else if (!state.provider.configured) {
+    elements['start-requirement'].textContent = '请先填写 XiaomuAI API Key 并保存';
+  } else if (!state.provider.llmAvailable) {
+    elements['start-requirement'].textContent = '当前 Key 无法调用所选大模型，请更换模型或检查账户权限';
   } else {
     elements['start-requirement'].textContent = '准备完成，可以开始面试';
+  }
+}
+
+function renderProvider() {
+  const provider = state.provider ?? { configured: false };
+  if (provider.configured) {
+    elements['provider-llm-model'].value = provider.llmModel;
+    elements['provider-stt-model'].value = provider.sttModel;
+    elements['provider-status'].textContent = provider.llmAvailable
+      ? (provider.sttAvailable ? '大模型与 STT 均可用' : '大模型可用；STT 将使用 Seed-ASR')
+      : '所选大模型不可用';
+  } else {
+    elements['provider-status'].textContent = '尚未配置';
+  }
+  elements['remove-provider'].classList.toggle('hidden', !provider.configured);
+}
+
+async function loadProvider() {
+  if (!state.config?.activated) {
+    state.provider = { configured: false };
+    renderProvider();
+    return;
+  }
+  state.provider = await api.getProvider();
+  renderProvider();
+  updateStartState();
+}
+
+async function saveProvider() {
+  const apiKey = elements['provider-key'].value.trim();
+  if (!apiKey) return showToast('请输入 XiaomuAI API Key', 'error');
+  elements['save-provider'].disabled = true;
+  try {
+    state.provider = await api.setProvider({
+      apiKey,
+      llmModel: elements['provider-llm-model'].value.trim(),
+      sttModel: elements['provider-stt-model'].value.trim(),
+    });
+    elements['provider-key'].value = '';
+    renderProvider();
+    const { models } = await api.getProviderModels();
+    elements['xiaomu-model-list'].replaceChildren(...models.map((model) => Object.assign(document.createElement('option'), { value: model })));
+    showToast(state.provider.sttAvailable ? 'XiaomuAI 配置已保存' : '大模型已配置，STT 将使用 Seed-ASR');
+  } catch (error) {
+    showToast(errorMessage(error), 'error');
+  } finally {
+    elements['save-provider'].disabled = false;
+    updateStartState();
   }
 }
 
@@ -92,6 +149,7 @@ async function testServer() {
     elements['connection-summary'].textContent = result.masterPackConfigured ? '服务正常，机构资料已就绪' : '服务正常，机构资料尚未就绪';
     elements['header-status'].textContent = result.masterPackConfigured ? '服务已连接' : '等待机构资料';
     if (!result.masterPackConfigured) showToast('机构资料尚未就绪', 'error');
+    if (state.config?.activated) await loadProvider();
   } catch (error) {
     state.connected = false;
     state.masterPackConfigured = false;
@@ -231,11 +289,13 @@ function renderAudioStatus() {
   const systemState = state.audioStatus.system;
   const micState = state.audioStatus.mic;
   let text = state.audioDeviceLabel;
+  const fallbackLabel = state.provider.configured && !state.provider.sttAvailable ? '（Seed-ASR 兜底）' : '';
   if (systemState === 'failed') text = '系统音频转写暂不可用';
   else if (systemState === 'reconnecting') text = '系统音频网络重连中';
   else if (micState === 'failed') text = `${state.audioDeviceLabel}；麦克风转写暂不可用`;
   else if (micState === 'reconnecting') text = `${state.audioDeviceLabel}；麦克风网络重连中`;
   else if (micState === 'connected') text = `${state.audioDeviceLabel} + 麦克风`;
+  if (systemState === 'connected' && fallbackLabel) text += fallbackLabel;
   elements['audio-state'].textContent = text;
   elements['audio-state'].title = state.audioErrors.system ?? state.audioErrors.mic ?? text;
 }
@@ -449,8 +509,17 @@ elements['activation-code'].addEventListener('keydown', (event) => { if (event.k
 elements['deactivate-button'].addEventListener('click', async () => {
   state.config = await api.deactivate();
   state.connected = false;
+  state.provider = { configured: false };
   renderConfig();
 });
+elements['save-provider'].addEventListener('click', saveProvider);
+elements['remove-provider'].addEventListener('click', async () => {
+  state.provider = await api.clearProvider();
+  elements['provider-key'].value = '';
+  renderProvider();
+  updateStartState();
+});
+elements['xiaomu-register'].addEventListener('click', () => api.openXiaomuai());
 elements['hotkey-recorder'].addEventListener('click', beginHotkeyRecording);
 elements['start-button'].addEventListener('click', startMeeting);
 elements['stop-button'].addEventListener('click', stopMeeting);

@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { MasterPackStore } from '../src/crypto-store.js';
 import { issueStudentToken, verifyStudentDevice, verifyStudentToken } from '../src/auth.js';
 import { buildHotwords, createVerbatimLeakGuard, hasVerbatimLeak, looksLikeExfiltration, retrieveChunks } from '../src/retrieval.js';
@@ -347,4 +348,30 @@ test('Seed-ASR emits a final event when text is unchanged but definite state cha
     { text: '问题', final: false },
     { text: '问题', final: true },
   ]);
+});
+
+test('failed memory generation preserves an existing known-good memory', async () => {
+  class MemoryHistory extends EventEmitter {
+    constructor() {
+      super();
+      this.memory = { summary: '旧的可靠长期记忆', sourceSessionId: 'old', updatedAt: 1 };
+      this.writes = [];
+    }
+    async getMemory() { return this.memory; }
+    async setMemory(_studentId, memory) { this.writes.push(memory); this.memory = memory; }
+  }
+  const history = new MemoryHistory();
+  const store = new SessionStore({ llm: {} }, { get: async () => ({ text: '' }) }, history);
+  try {
+    store.scheduleMemory({
+      id: 'new-session', studentId: 'student-1', supplement: '', transcripts: [],
+      answerHistory: [{ question: '问题', answer: '本场回答', at: 2 }],
+      provider: { configured: true, llmAvailable: false },
+    });
+    await store.waitForMemoryJobs();
+    assert.deepEqual(history.memory, { summary: '旧的可靠长期记忆', sourceSessionId: 'old', updatedAt: 1 });
+    assert.equal(history.writes.length, 0);
+  } finally {
+    store.close();
+  }
 });

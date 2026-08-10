@@ -103,6 +103,18 @@ input::placeholder, textarea::placeholder { color: #99a39e; }
 .activated-row { min-height: 38px; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px 4px 10px; border-left: 3px solid var(--green); background: var(--green-soft); border-radius: 0 6px 6px 0; }
 .activated-row > div { display: flex; align-items: center; gap: 7px; color: var(--green-dark); font-size: 12px; font-weight: 650; }
 .activated-row svg { width: 16px; height: 16px; }
+.provider-section { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfd; }
+.provider-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.provider-heading > div { display: grid; gap: 2px; }
+.provider-heading span { color: var(--muted); font-size: 12px; }
+.provider-models { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 460px) {
+  main { padding-left: 14px; padding-right: 14px; }
+  .provider-heading { align-items: flex-start; flex-direction: column; }
+  .provider-models { grid-template-columns: 1fr; }
+  .provider-section .input-action-row { grid-template-columns: 1fr; }
+  .provider-section .secondary-button { width: 100%; }
+}
 
 .setting-row { height: 58px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
 .setting-label { min-width: 0; display: flex; align-items: center; gap: 11px; }

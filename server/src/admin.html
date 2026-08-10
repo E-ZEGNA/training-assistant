@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>面试助教 · 机构管理</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#17212b;background:#f4f7f9}body{margin:0}header{background:#17212b;color:white;padding:18px 24px}main{display:grid;grid-template-columns:280px 1fr;gap:16px;max-width:1180px;margin:20px auto;padding:0 16px}.card{background:white;border:1px solid #dce4e9;border-radius:10px;padding:16px;box-shadow:0 2px 10px #13202b0d}input,button{font:inherit;padding:8px 10px;border:1px solid #c7d2d9;border-radius:7px}button{cursor:pointer;background:#1677ff;color:#fff;border-color:#1677ff}.danger{background:#c62828;border-color:#c62828}.muted{color:#65727d;font-size:13px}.student{display:block;width:100%;text-align:left;background:#f7f9fa;color:#17212b;border-color:#dce4e9;margin-top:8px}.student.active{border-color:#1677ff;background:#eaf3ff}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.session{border-top:1px solid #e5eaee;padding:12px 0}.session:first-child{border-top:0}.transcript{white-space:pre-wrap;background:#f7f9fa;padding:10px;border-radius:7px;max-height:340px;overflow:auto}.hidden{display:none}@media(max-width:760px){main{display:block}.card+ .card{margin-top:16px}}
+  </style>
+</head>
+<body>
+  <header><strong>面试助教 · 机构管理</strong><span id="status" class="muted" style="color:#c9d4dc;margin-left:12px">未连接</span></header>
+  <main>
+    <section class="card">
+      <div class="row"><input id="key" type="password" placeholder="ADMIN_API_KEY" style="flex:1" /><button id="load">加载</button></div>
+      <p class="muted">密钥只保存在当前页面内存，刷新后需要重新输入。</p>
+      <div id="students"></div>
+    </section>
+    <section class="card"><div id="detail"><p class="muted">先加载学员列表。</p></div></section>
+  </main>
+  <script>
+    const state={key:'',studentId:'',detail:null}; const $=(id)=>document.getElementById(id);
+    async function api(path, options={}){const response=await fetch(path,{...options,headers:{'content-type':'application/json','x-admin-key':state.key,...(options.headers||{})}});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`请求失败 ${response.status}`);return body}
+    function renderStudents(rows){$('students').innerHTML=rows.length?rows.map(row=>`<button class="student ${row.studentId===state.studentId?'active':''}" data-student="${encodeURIComponent(row.studentId)}">${escapeHtml(row.studentId)}<br><span class="muted">${row.sessionCount} 场 · ${row.lastInterviewAt?new Date(row.lastInterviewAt).toLocaleString():'暂无记录'}</span></button>`).join(''):'<p class="muted">暂无学员历史。</p>';document.querySelectorAll('[data-student]').forEach(button=>button.onclick=()=>loadStudent(decodeURIComponent(button.dataset.student)))}
+    async function loadStudents(){state.key=$('key').value.trim();if(!state.key)throw new Error('请输入管理员密钥');const rows=await api('/v1/admin/students');renderStudents(rows);$('status').textContent='已连接'}
+    async function loadStudent(studentId){state.studentId=studentId;const detail=await api(`/v1/admin/students/${encodeURIComponent(studentId)}`);state.detail=detail;renderStudents(await api('/v1/admin/students'));$('detail').innerHTML=`<div class="row"><h2 style="margin:0;flex:1">${escapeHtml(detail.studentId)}</h2><button class="danger" id="delete-student">删除学员档案</button></div><p class="muted">长期记忆更新时间：${detail.memory?.updatedAt?new Date(detail.memory.updatedAt).toLocaleString():'暂无'}</p><div class="transcript">${escapeHtml(detail.memory?.summary||'暂无长期记忆')}</div><h3>面试记录</h3>${detail.sessions.map(session=>`<div class="session"><div class="row"><strong>${new Date(session.createdAt).toLocaleString()}</strong><span class="muted">${escapeHtml(session.status)}</span><button data-session="${encodeURIComponent(session.id)}">查看</button></div><div class="muted">补充包：${escapeHtml(session.supplement||'无')}</div></div>`).join('')||'<p class="muted">暂无记录</p>'}`;document.querySelectorAll('[data-session]').forEach(button=>button.onclick=()=>loadSession(decodeURIComponent(button.dataset.session)));$('delete-student').onclick=async()=>{if(!confirm('确认删除该学员全部历史？此操作不可恢复。'))return;await api(`/v1/admin/students/${encodeURIComponent(studentId)}`,{method:'DELETE'});state.studentId='';$('detail').innerHTML='<p class="muted">已删除。</p>';await loadStudents()}}
+    async function loadSession(sessionId){const session=await api(`/v1/admin/students/${encodeURIComponent(state.studentId)}/sessions/${encodeURIComponent(sessionId)}`);$('detail').innerHTML=`<div class="row"><button id="back">返回学员</button><h2 style="margin:0;flex:1">${new Date(session.createdAt).toLocaleString()}</h2><button class="danger" id="delete-session">删除本场</button></div><p>补充包：${escapeHtml(session.supplement||'无')}</p><h3>完整转写</h3><div class="transcript">${escapeHtml(session.transcripts.map(item=>`${item.channel==='system'?'面试官':'学员'}：${item.text}`).join('\n')||'暂无转写')}</div><h3>生成回答</h3><div class="transcript">${escapeHtml(session.answers.map(item=>`问题：${item.question}\n回答：${item.answer}`).join('\n\n')||'暂无回答')}</div>`;$('back').onclick=()=>loadStudent(state.studentId);$('delete-session').onclick=async()=>{if(!confirm('确认删除本场面试？'))return;await api(`/v1/admin/students/${encodeURIComponent(state.studentId)}/sessions/${encodeURIComponent(sessionId)}`,{method:'DELETE'});await loadStudent(state.studentId)}}
+    function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]))}
+    $('load').onclick=()=>loadStudents().catch(error=>{$('status').textContent=error.message});
+  </script>
+</body>
+</html>

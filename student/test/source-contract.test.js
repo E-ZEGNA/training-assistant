@@ -23,6 +23,17 @@ test('activation token uses Electron safeStorage and renderer never receives it'
   assert.doesNotMatch(publicMethod, /activationToken:/);
 });
 
+test('XiaomuAI API key is sent directly to the service and never enters local ConfigStore', () => {
+  const config = read('electron/config-store.js');
+  const renderer = read('renderer/app.js');
+  const service = read('electron/service-client.js');
+  assert.doesNotMatch(config, /providerKey|apiKey|xiaomu/i);
+  assert.match(renderer, /api\.setProvider\(\{\s*apiKey,/s);
+  assert.match(renderer, /elements\['provider-key'\]\.value = ''/);
+  assert.match(service, /request\('\/v1\/student\/provider', \{ method: 'PUT'/);
+  assert.doesNotMatch(renderer, /localStorage|sessionStorage|indexedDB/);
+});
+
 test('renderer is isolated and remote navigation is blocked', () => {
   const main = read('electron/main.js');
   assert.match(main, /contextIsolation: true/);

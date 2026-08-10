@@ -5,9 +5,9 @@
 ## 数据边界
 
 - 主线程包：发布方通过管理接口写入，AES-256-GCM 加密落盘。学生接口没有读取能力。
-- 补充包：学员每场开始时输入，只保存在服务端会话内存，结束或超时后清空。
-- 转写与答案：只保存在当前服务端会话内存，不写客户端数据库或日志。
-- 学员凭据：Windows `safeStorage` 加密保存；机构 API Key、ASR Key 和 LLM Key 不进入客户端。
+- 补充包、最终转写、生成答案和长期训练记忆：服务端按 `studentId` 隔离，SQLite 使用 WAL 和 AES-256-GCM 加密落盘；不保存原始音频。
+- 学员凭据：激活 token 由 Windows `safeStorage` 加密保存；XiaomuAI API Key 只经学生端提交到服务端并加密保存，不进入本地配置文件、管理员响应或日志。
+- 持久化是实时链路旁路异步队列；数据库不可写、队列满或重启不会阻塞当前转写和回答。重复最终转写按 `utteranceId` 覆盖。
 
 ## 本机启动
 
@@ -25,6 +25,8 @@ npm --workspace server start
 node --env-file=server/.env server/scripts/publish-master.mjs --file D:/secure/master-pack.md
 npm --workspace student run dev
 ```
+
+学员激活后，在学生端填写自己在 XiaomuAI 注册得到的 API Key。服务端会验证所选模型；大模型可用而 STT 模型不可用时，音频自动使用 Seed-ASR 兜底。管理员使用 `ADMIN_API_KEY` 访问 `http://127.0.0.1:8787/admin`，可按学员查看完整面试记录、长期记忆并手动删除记录。
 
 主包、主包密文、机构密钥、API Key 和本机 Codex token 均不得提交到代码仓库。
 

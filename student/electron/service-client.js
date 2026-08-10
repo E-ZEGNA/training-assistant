@@ -55,6 +55,26 @@ class ServiceClient extends EventEmitter {
     return response.json();
   }
 
+  async getProvider() {
+    const response = await this.request('/v1/student/provider');
+    return response.json();
+  }
+
+  async setProvider(configuration) {
+    const response = await this.request('/v1/student/provider', { method: 'PUT', body: JSON.stringify(configuration) });
+    return response.json();
+  }
+
+  async clearProvider() {
+    const response = await this.request('/v1/student/provider', { method: 'DELETE' });
+    return response.json();
+  }
+
+  async getProviderModels() {
+    const response = await this.request('/v1/student/provider/models');
+    return response.json();
+  }
+
   async startSession(supplement) {
     await this.stopSession();
     const response = await this.request('/v1/sessions', {

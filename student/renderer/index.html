@@ -47,6 +47,17 @@
             <div><i data-lucide="badge-check"></i><span>已激活</span></div>
             <button id="deactivate-button" class="text-button">重新激活</button>
           </div>
+          <section id="provider-section" class="provider-section hidden full-width">
+            <div class="provider-heading"><div><strong>XiaomuAI 模型服务</strong><span id="provider-status">尚未配置</span></div><button id="xiaomu-register" class="text-button">注册 / 获取 Key</button></div>
+            <label class="field full-width"><span>API 地址</span><input id="provider-base-url" value="https://xiaomuai.cn/v1" readonly /></label>
+            <label class="field full-width"><span>API Key</span><input id="provider-key" type="password" autocomplete="off" placeholder="sk-...（保存后不再回显）" /></label>
+            <div class="provider-models">
+              <label class="field"><span>大模型</span><input id="provider-llm-model" list="xiaomu-model-list" value="gpt-5.6-terra" /></label>
+              <label class="field"><span>STT 模型</span><input id="provider-stt-model" list="xiaomu-model-list" value="mimo-v2.5-asr" /></label>
+            </div>
+            <datalist id="xiaomu-model-list"></datalist>
+            <div class="input-action-row"><button id="save-provider" class="secondary-button"><i data-lucide="save"></i><span>保存并验证</span></button><button id="remove-provider" class="text-button hidden">移除 Key</button></div>
+          </section>
         </div>
 
         <div class="divider"></div>

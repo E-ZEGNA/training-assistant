@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { buildHotwords } from './retrieval.js';
-import { MockAsrStream, SeedAsrStream } from './seed-asr.js';
+import { MockAsrStream } from './seed-asr.js';
+import { createStudentAsrStream } from './xiaomuai.js';
+import { generateStudentMemory } from './llm.js';
 
 export class SessionStore {
-  constructor(config, masterStore) {
+  constructor(config, masterStore, historyStore = null) {
     this.config = config;
     this.masterStore = masterStore;
+    this.historyStore = historyStore;
     this.sessions = new Map();
+    this.memoryJobs = new Map();
     this.cleanupTimer = setInterval(() => this.cleanup(), 60_000);
     this.cleanupTimer.unref?.();
   }
@@ -23,6 +27,13 @@ export class SessionStore {
       throw error;
     }
     const master = await this.masterStore.get();
+    const provider = this.historyStore ? await this.historyStore.getProvider(studentId) : null;
+    if (this.config.requireStudentProvider && !provider) {
+      const error = new Error('Student provider is not configured');
+      error.statusCode = 412;
+      error.code = 'provider_not_configured';
+      throw error;
+    }
     const now = Date.now();
     const session = {
       id: randomUUID(),
@@ -37,8 +48,11 @@ export class SessionStore {
       transcriptRevision: 0,
       answeredRevision: 0,
       hotwords: buildHotwords(master.text, supplement),
+      provider,
+      memory: this.historyStore ? await this.historyStore.getMemory(studentId) : null,
     };
     this.sessions.set(session.id, session);
+    this.historyStore?.recordSession(session);
     return session;
   }
 
@@ -49,13 +63,21 @@ export class SessionStore {
     return session;
   }
 
+  list(studentId) {
+    return [...this.sessions.values()].filter((session) => session.studentId === studentId);
+  }
+
   createAsr(session, channel) {
     const existing = session.audioStreams.get(channel);
     existing?.stop();
     const common = { uid: `${session.studentId}-${channel}`, hotwords: session.hotwords };
     const stream = this.config.sttProvider === 'mock'
       ? new MockAsrStream()
-      : new SeedAsrStream({ ...this.config.seedAsr, ...common });
+      : createStudentAsrStream({
+        provider: session.provider ? { ...session.provider, timeoutMs: this.config.xiaomuai.timeoutMs } : null,
+        seedConfig: this.config.seedAsr,
+        ...common,
+      });
     session.audioStreams.set(channel, stream);
     return stream;
   }
@@ -77,6 +99,8 @@ export class SessionStore {
         previous.revision = revision;
       }
       session.partialByUtterance.delete(partialKey);
+      const saved = session.transcripts.find((item) => item.utteranceId === utteranceId && item.channel === channel);
+      if (saved) this.historyStore?.recordTranscript(session, saved);
     }
   }
 
@@ -115,10 +139,14 @@ export class SessionStore {
     if (Number.isSafeInteger(revision)) session.answeredRevision = Math.max(session.answeredRevision, revision);
   }
 
-  end(id, studentId) {
-    const session = this.get(id, studentId);
-    if (!session) return false;
+  end(id, studentId, status = 'ended') {
+    // Ending is also used by TTL cleanup and admin shutdown, where the live
+    // session may already be past its access expiry. Do not route through get().
+    const session = this.sessions.get(id);
+    if (!session || session.studentId !== studentId) return false;
     for (const stream of session.audioStreams.values()) stream.stop();
+    this.historyStore?.recordSession(session, status, Date.now());
+    this.scheduleMemory(session);
     session.supplement = '';
     session.hotwords = [];
     session.transcripts = [];
@@ -132,12 +160,42 @@ export class SessionStore {
 
   cleanup() {
     for (const session of this.sessions.values()) {
-      if (session.expiresAt <= Date.now()) this.end(session.id, session.studentId);
+      if (session.expiresAt <= Date.now()) this.end(session.id, session.studentId, 'expired');
     }
+  }
+
+  scheduleMemory(session) {
+    if (!this.historyStore) return;
+    const snapshot = {
+      ...session,
+      supplement: session.supplement,
+      answerHistory: [...session.answerHistory],
+      transcripts: session.transcripts.map((item) => ({ ...item })),
+      provider: session.provider ? { ...session.provider } : null,
+    };
+    const previous = this.memoryJobs.get(session.studentId) ?? Promise.resolve();
+    const job = previous.catch(() => {}).then(async () => {
+      const memory = await generateStudentMemory({ config: this.config, session: snapshot });
+      const previousMemory = await this.historyStore.getMemory(session.studentId);
+      // A failed/unavailable memory model must never replace a known-good version.
+      // If this is the first interview, keep the bounded local fallback so the
+      // administrator still has something to review.
+      if (memory?.generated === false && previousMemory) return;
+      const { generated: _generated, ...persistedMemory } = memory ?? {};
+      if (memory) await this.historyStore.setMemory(session.studentId, persistedMemory);
+    }).catch((error) => this.historyStore.emit('memory-error', { studentId: session.studentId, error: error.message }));
+    const tracked = job.finally(() => {
+      if (this.memoryJobs.get(session.studentId) === tracked) this.memoryJobs.delete(session.studentId);
+    });
+    this.memoryJobs.set(session.studentId, tracked);
   }
 
   close() {
     clearInterval(this.cleanupTimer);
     for (const session of [...this.sessions.values()]) this.end(session.id, session.studentId);
+  }
+
+  async waitForMemoryJobs() {
+    await Promise.allSettled([...this.memoryJobs.values()]);
   }
 }

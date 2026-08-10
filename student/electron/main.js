@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, session } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, session, shell } = require('electron');
 const path = require('node:path');
 const { ConfigStore } = require('./config-store');
 const { ServiceClient, ServiceError } = require('./service-client');
@@ -87,6 +87,8 @@ function friendlyError(error) {
     answer_rate_limited: '请求过于频繁，请稍后再试。',
     answer_generation_failed: '模型生成失败，请稍后重试。',
     answer_stream_interrupted: '回答传输中断，请重新生成。',
+    provider_not_configured: '请先配置 XiaomuAI API Key。',
+    invalid_provider_configuration: 'XiaomuAI 配置格式不正确。',
     session_not_found: '本场会话已过期，请结束后重新开始。',
     unauthorized: '激活状态已失效，请重新激活。',
   };
@@ -125,6 +127,11 @@ function registerIpc() {
     configStore.clearActivationToken();
     return configStore.publicValue();
   });
+  ipcMain.handle('provider:get', () => serviceClient.getProvider());
+  ipcMain.handle('provider:set', (_event, configuration) => serviceClient.setProvider(configuration ?? {}));
+  ipcMain.handle('provider:clear', () => serviceClient.clearProvider());
+  ipcMain.handle('provider:models', () => serviceClient.getProviderModels());
+  ipcMain.handle('provider:open-xiaomuai', () => shell.openExternal('https://xiaomuai.cn/register'));
   ipcMain.handle('session:start', async (_event, payload) => {
     const supplement = String(payload?.supplement ?? '');
     const microphoneEnabled = payload?.microphoneEnabled === true;

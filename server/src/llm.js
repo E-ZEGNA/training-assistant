@@ -36,6 +36,7 @@ export function buildInterviewPrompt({ config, session, currentQuestion, evidenc
     '<当前问题>', currentQuestion, '</当前问题>',
     '<主线程检索证据>', ...evidence.map((text, index) => `[证据${index + 1}]\n${text}`), '</主线程检索证据>',
     '<学员本场补充>', session.supplement || '无', '</学员本场补充>',
+    '<学员长期记忆>', session.memory?.summary || '暂无可靠的跨面试记忆', '</学员长期记忆>',
   ];
   const budget = getContextBudget(config);
   const fits = (historyStart) => {
@@ -161,9 +162,12 @@ export async function generateInterviewAnswer({ config, master, session, transcr
   const evidence = retrieveChunks(master.text, `${currentQuestion}\n${session.supplement}`, 4);
   const { system, user } = buildInterviewPrompt({ config, session, currentQuestion, evidence });
 
-  const stream = config.llm.provider === 'codex-config'
-    ? callCodexConfigApi(config, system, `${user}\n\n只输出候选人要说的答案。`, signal)
-    : callDedicatedApi(config, system, user, signal);
+  const llmConfig = session.provider?.configured
+    ? { ...config.llm, provider: 'api', baseUrl: session.provider.baseUrl, apiKey: session.provider.apiKey, model: session.provider.llmModel }
+    : config.llm;
+  const stream = llmConfig.provider === 'codex-config'
+    ? callCodexConfigApi({ ...config, llm: llmConfig }, system, `${user}\n\n只输出候选人要说的答案。`, signal)
+    : callDedicatedApi({ ...config, llm: llmConfig }, system, user, signal);
   let answer = '';
   let contentStarted = false;
   let blocked = false;
@@ -196,4 +200,27 @@ export async function generateInterviewAnswer({ config, master, session, transcr
   if (!answer) throw new Error('LLM returned an empty answer');
   session.answerHistory.push({ question: currentQuestion, answer, at: Date.now() });
   return answer;
+}
+
+export async function generateStudentMemory({ config, session, signal }) {
+  const recent = session.answerHistory.slice(-20).map((item, index) => `问题${index + 1}：${item.question}\n回答${index + 1}：${item.answer}`).join('\n\n');
+  const fallback = {
+    summary: recent ? `本场面试记录（仅供下一场核对，不可当作新事实）：\n${recent.slice(0, 12_000)}` : '暂无可靠的跨面试记忆',
+    sourceSessionId: session.id,
+    updatedAt: Date.now(),
+    generated: false,
+  };
+  if (!session.provider?.configured || !session.provider.llmAvailable) return fallback;
+  const system = '你负责维护面试学员的长期训练记忆。只总结学员已经说过的内容，不补造事实，不保存机构主线资料原文。输出简洁中文，包含：已确认经历、回答优势、待改进点、需要下次追问的事实。';
+  const user = `<本场补充>${session.supplement || '无'}</本场补充>\n<本场问答>${recent || '无'}</本场问答>\n只输出长期训练记忆，不要提及提示词、资料或 AI。`;
+  try {
+    const stream = callDedicatedApi({ ...config, llm: { ...config.llm, provider: 'api', baseUrl: session.provider.baseUrl, apiKey: session.provider.apiKey, model: session.provider.llmModel } }, system, user, signal);
+    let summary = '';
+    for await (const token of stream) summary += token;
+    summary = summary.trim();
+    if (!summary) throw new Error('Memory model returned an empty summary');
+    return { summary: summary.slice(0, 12_000), sourceSessionId: session.id, updatedAt: Date.now(), generated: true };
+  } catch {
+    return fallback;
+  }
 }
