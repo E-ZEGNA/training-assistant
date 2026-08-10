@@ -129,13 +129,13 @@ test('failed answer generation does not advance the answered transcript boundary
   }
 });
 
-test('answer generation retries once in the same stream after a model failure', async () => {
+test('answer generation retries through a short upstream outage in the same stream', async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async (url, options) => {
     if (!String(url).endsWith('/chat/completions')) return originalFetch(url, options);
     calls += 1;
-    const body = calls === 1
+    const body = calls <= 2
       ? 'event: message\ndata: {"error":{"message":"temporary upstream failure"}}\n\n\n'
       : 'data: {"choices":[{"delta":{"content":"重试成功"}}]}\n\ndata: [DONE]\n\n';
     return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
@@ -151,7 +151,7 @@ test('answer generation retries once in the same stream after a model failure', 
     const response = await fetch(`${baseUrl}/v1/sessions/${sessionInfo.id}/answer`, { method: 'POST', headers: student.headers, body: '{}' });
     const body = await response.text();
     assert.equal(response.status, 200);
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
     assert.match(body, /event: replace\ndata: \{"text":""\}/);
     assert.match(body, /event: token\ndata: \{"token":"重试成功"\}/);
     assert.match(body, /event: done/);

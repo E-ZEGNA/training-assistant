@@ -190,7 +190,7 @@ export function createApplication(config) {
         try {
           let answer;
           let lastError;
-          for (let attempt = 0; attempt < 2; attempt += 1) {
+          for (let attempt = 0; attempt < 3; attempt += 1) {
             try {
               answer = await generateInterviewAnswer({
                 config,
@@ -205,9 +205,10 @@ export function createApplication(config) {
               break;
             } catch (error) {
               lastError = error;
-              if (error?.name === 'AbortError' || attempt === 1) throw error;
+              if (error?.name === 'AbortError' || attempt === 2) throw error;
               log('answer_retry', { sessionId: session.id, studentId: claims.sub, attempt: attempt + 1 });
               sendSse(res, 'replace', { text: '' });
+              if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250));
             }
           }
           if (lastError || !answer) throw lastError ?? new Error('LLM returned an empty answer');
