@@ -69,8 +69,11 @@ test('student binding persists without raw device or IP values', async () => {
     assert.equal(disk.includes('203.0.113.10'), false);
     const restored = new StudentBindingStore(directory, 'binding-secret');
     assert.equal(restored.verify({
-      studentId: 'student-a', bindingId: activated.binding.bindingId, deviceId: 'device-12345678', clientIp: '203.0.113.10',
+      studentId: 'student-a', bindingId: activated.binding.bindingId, deviceId: 'device-12345678',
     }), true);
+    assert.equal(restored.verify({
+      studentId: 'student-a', bindingId: activated.binding.bindingId, deviceId: 'device-87654321',
+    }), false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -36,9 +36,14 @@ test('production service address is internal and not editable by the renderer', 
 
 test('activation failures are translated without exposing internal error codes', () => {
   const main = read('electron/main.js');
+  const client = read('electron/service-client.js');
+  const renderer = read('renderer/app.js');
   assert.match(main, /activation_already_bound: '该激活码已绑定其他设备或网络/);
   assert.match(main, /invalid_activation: '激活码无效/);
   assert.match(main, /throw new Error\(friendlyError\(error\)\)/);
+  assert.match(client, /authorization-failed/);
+  assert.match(main, /configStore\.clearActivationToken\(\)/);
+  assert.match(renderer, /onConfigChanged/);
 });
 
 test('renderer is isolated and remote navigation is blocked', () => {

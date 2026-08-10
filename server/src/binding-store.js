@@ -86,11 +86,10 @@ export class StudentBindingStore {
     return { ok: true, binding };
   }
 
-  verify({ studentId, bindingId, deviceId, clientIp }) {
+  verify({ studentId, bindingId, deviceId }) {
     const binding = this.bindings.get(studentId);
     if (!binding || binding.status !== 'active' || binding.bindingId !== bindingId) return false;
-    return sameFingerprint(binding.deviceHash, this.fingerprint('device', deviceId))
-      && sameFingerprint(binding.ipHash, this.fingerprint('ip', clientIp));
+    return sameFingerprint(binding.deviceHash, this.fingerprint('device', deviceId));
   }
 
   revoke(studentId) {

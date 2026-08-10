@@ -46,3 +46,16 @@ test('answer rejects a stream that closes without done', async () => {
     await assert.rejects(client.answer(), (error) => error instanceof ServiceError && error.code === 'answer_stream_interrupted');
   });
 });
+
+test('a 401 response emits an authorization failure for client recovery', async () => {
+  await withServer((_req, res) => {
+    res.writeHead(401, { 'content-type': 'application/json' });
+    res.end('{"error":"unauthorized"}');
+  }, async (baseUrl) => {
+    const client = clientFor(baseUrl);
+    const failures = [];
+    client.on('authorization-failed', (error) => failures.push(error.code));
+    await assert.rejects(client.request('/protected'), (error) => error instanceof ServiceError && error.code === 'unauthorized');
+    assert.deepEqual(failures, ['unauthorized']);
+  });
+});

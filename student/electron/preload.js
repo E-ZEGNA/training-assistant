@@ -26,4 +26,5 @@ contextBridge.exposeInMainWorld('interviewAPI', {
   onAnswerReplace: (callback) => subscribe('answer:replace', callback),
   onAnswerDone: (callback) => subscribe('answer:done', callback),
   onAnswerError: (callback) => subscribe('answer:error', callback),
+  onConfigChanged: (callback) => subscribe('config:changed', callback),
 });

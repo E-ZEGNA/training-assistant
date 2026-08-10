@@ -20,7 +20,6 @@ function authStudent(req, config, bindingStore) {
     studentId: claims.sub,
     bindingId: claims.binding,
     deviceId,
-    clientIp: getClientIp(req, config.trustProxy),
   });
   return authorized ? claims : null;
 }
