@@ -55,21 +55,24 @@ export function createApplication(config) {
     res.setHeader('x-frame-options', 'DENY');
     try {
       if (req.method === 'GET' && pathname === '/health') {
-        const status = await masterStore.status();
-        return json(res, 200, { ok: true, masterPackConfigured: status.configured });
+        return json(res, 200, { ok: true, masterPackConfigured: await masterStore.hasAny() });
       }
 
       if (req.method === 'GET' && pathname === '/v1/admin/master-pack/status') {
         if (!requireAdmin(req, config)) return json(res, 401, { error: 'unauthorized' });
-        return json(res, 200, await masterStore.status());
+        const studentId = requestUrl.searchParams.get('studentId') ?? undefined;
+        if (studentId) return json(res, 200, await masterStore.status(studentId));
+        return json(res, 200, { configured: await masterStore.hasAny() });
       }
 
       if (req.method === 'PUT' && pathname === '/v1/admin/master-pack') {
         if (!requireAdmin(req, config)) return json(res, 401, { error: 'unauthorized' });
         const body = await readJson(req, 2_100_000);
+        const studentId = String(body.studentId ?? '').trim();
+        if (!studentId) return json(res, 400, { error: 'student_id_required' });
         const version = String(body.version ?? new Date().toISOString());
-        const result = await masterStore.put({ text: body.text, version });
-        log('master_pack_published', { version: result.version, characters: result.characters });
+        const result = await masterStore.put({ studentId, text: body.text, version });
+        log('master_pack_published', { studentId, version: result.version, characters: result.characters });
         return json(res, 200, result);
       }
 
@@ -137,7 +140,7 @@ export function createApplication(config) {
         const transcriptContext = sessionStore.context(session);
         if (!transcriptContext.text.trim()) return json(res, 409, { error: 'no_transcript_yet' });
         if (session.answerInProgress) return json(res, 409, { error: 'answer_in_progress' });
-        const master = await masterStore.get();
+        const master = await masterStore.get(session.studentId);
         session.answerInProgress = true;
         const controller = new AbortController();
         res.once('close', () => {
@@ -183,7 +186,7 @@ export function createApplication(config) {
       if (error?.name === 'AbortError') return;
       const status = error?.statusCode ?? (/not configured|ENOENT/.test(String(error?.message)) ? 503 : 500);
       log('request_failed', { path: pathname, status, error: error?.message ?? 'unknown' });
-      if (!res.headersSent) json(res, status, { error: status === 500 ? 'internal_error' : error.message });
+      if (!res.headersSent) json(res, status, { error: error.publicCode ?? (status === 500 ? 'internal_error' : error.message) });
       else res.end();
     }
   });

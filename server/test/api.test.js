@@ -28,7 +28,7 @@ test('admin publishes without exposing master content to student endpoints', asy
     const masterText = '机密主包：GPU 调度项目，利用率提升 18%，故障恢复时间降低 40%。';
     let response = await fetch(`${baseUrl}/v1/admin/master-pack`, {
       method: 'PUT', headers: { 'content-type': 'application/json', 'x-admin-key': 'admin-secret' },
-      body: JSON.stringify({ text: masterText, version: '2026.08' }),
+      body: JSON.stringify({ studentId: 'student-1', text: masterText, version: '2026.08' }),
     });
     assert.equal(response.status, 200);
 
@@ -65,7 +65,7 @@ test('admin publishes without exposing master content to student endpoints', asy
 test('student routes enforce authorization and supplement limits', async () => {
   const { application, baseUrl, dataDir } = await fixture();
   try {
-    await application.masterStore.put({ text: '足够长的主线程包内容，用于服务端检索和安全测试。', version: 'v1' });
+    await application.masterStore.put({ studentId: 'student-1', text: '足够长的主线程包内容，用于服务端检索和安全测试。', version: 'v1' });
     const unauthorized = await fetch(`${baseUrl}/v1/sessions`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ supplement: 'x' }),
     });
@@ -81,6 +81,47 @@ test('student routes enforce authorization and supplement limits', async () => {
       body: JSON.stringify({ supplement: 'x'.repeat(30_001) }),
     });
     assert.equal(oversized.status, 400);
+  } finally {
+    await application.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('student sessions use the assigned master pack and reject unassigned students', async () => {
+  const { application, baseUrl, dataDir } = await fixture({
+    activationCodes: new Map([
+      ['activate-a', 'student-a'],
+      ['activate-b', 'student-b'],
+    ]),
+  });
+  try {
+    let response = await fetch(`${baseUrl}/v1/admin/master-pack`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', 'x-admin-key': 'admin-secret' },
+      body: JSON.stringify({ text: '没有学员 ID 的包不应该被接受。' }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, 'student_id_required');
+
+    const activate = (code, deviceId) => fetch(`${baseUrl}/v1/student/activate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, deviceId }),
+    });
+    const first = await activate('activate-a', 'device-a-12345678');
+    const second = await activate('activate-b', 'device-b-12345678');
+    const firstToken = (await first.json()).token;
+    const secondToken = (await second.json()).token;
+    const headers = (token, deviceId) => ({ 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-device-id': deviceId });
+
+    response = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers: headers(secondToken, 'device-b-12345678'), body: JSON.stringify({ supplement: '' }),
+    });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error, 'master_pack_not_configured');
+
+    await application.masterStore.put({ studentId: 'student-a', text: '学员 A 的独立主线程包，长度足够用于测试。', version: 'a-v1' });
+    response = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers: headers(firstToken, 'device-a-12345678'), body: JSON.stringify({ supplement: '' }),
+    });
+    assert.equal(response.status, 201);
   } finally {
     await application.close();
     await rm(dataDir, { recursive: true, force: true });
@@ -138,7 +179,7 @@ test('admin can revoke and reset a binding', async () => {
 test('failed answer generation does not advance the answered transcript boundary', async () => {
   const { application, baseUrl, dataDir } = await fixture();
   try {
-    await application.masterStore.put({ text: '主线程资料，用于回答失败边界测试。'.repeat(4), version: 'v1' });
+    await application.masterStore.put({ studentId: 'student-1', text: '主线程资料，用于回答失败边界测试。'.repeat(4), version: 'v1' });
     const activation = await fetch(`${baseUrl}/v1/student/activate`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ code: 'activate-me', deviceId: 'device-12345678' }),

@@ -23,7 +23,7 @@ npm --workspace server start
 另开终端，从仓库外部文件上传主包并启动学生端：
 
 ```powershell
-node --env-file=server/.env server/scripts/publish-master.mjs --file D:/secure/master-pack.md
+node --env-file=server/.env server/scripts/publish-master.mjs --file D:/secure/student-a-master.md --student-id student-a
 npm --workspace student run dev
 ```
 
