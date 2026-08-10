@@ -170,6 +170,9 @@ class ServiceClient extends EventEmitter {
           answer = data.text;
           this.emit('answer-replace', { text: data.text });
         }
+        if (type === 'retry' && Number.isSafeInteger(data.attempt) && Number.isSafeInteger(data.maxAttempts)) {
+          this.emit('answer-retry', { attempt: data.attempt, maxAttempts: data.maxAttempts });
+        }
         if (type === 'done') completed = true;
         if (type === 'error') {
           throw new ServiceError('回答生成失败', 502, data.error ?? 'answer_generation_failed');

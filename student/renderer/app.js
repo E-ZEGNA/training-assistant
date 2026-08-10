@@ -408,6 +408,7 @@ api.onAnswerStarted(() => {
 });
 api.onAnswerToken(({ token }) => {
   if (!state.meeting || !state.currentAnswerNode) return;
+  elements['answer-state'].textContent = '正在生成';
   state.answerTokenBuffer += token;
   scheduleAnswerTokenFlush();
 });
@@ -415,6 +416,10 @@ api.onAnswerReplace(({ text }) => {
   if (!state.meeting || !state.currentAnswerNode) return;
   resetAnswerTokenBuffer();
   state.currentAnswerNode.querySelector('.answer-text').textContent = text;
+});
+api.onAnswerRetry(({ attempt, maxAttempts }) => {
+  if (!state.meeting || !state.answerPending) return;
+  elements['answer-state'].textContent = `连接波动，正在重试 ${attempt}/${maxAttempts}`;
 });
 api.onAnswerDone(() => {
   flushAnswerTokens();

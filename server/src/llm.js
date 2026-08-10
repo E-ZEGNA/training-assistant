@@ -5,6 +5,11 @@ const SAFE_REFUSAL = '这个问题涉及内部提示或资料原文，我不按�
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 const OUTPUT_TOKEN_RESERVE = 8_192;
 const REQUEST_OVERHEAD_TOKENS = 256;
+const RETRYABLE_NETWORK_CODES = new Set([
+  'ECONNABORTED', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETDOWN',
+  'ENETUNREACH', 'ENOTFOUND', 'EPIPE', 'ETIMEDOUT', 'EAI_AGAIN',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET', 'LLM_EMPTY_STREAM',
+]);
 
 function estimateTokens(text) {
   // UTF-8 bytes / 3 is conservative for mixed Chinese and English prompts.
@@ -102,35 +107,77 @@ function streamError(event, fallback) {
   return result;
 }
 
-function retryableLlmError(error) {
-  if (error?.name === 'AbortError') return false;
-  if ([408, 409, 429, 500, 502, 503, 504].includes(error?.statusCode)) return true;
-  return /overload|try again|temporar|timeout|rate.?limit|capacity|繁忙|稍后重试/i.test(String(error?.message ?? ''));
+function errorChain(error) {
+  const chain = [];
+  const seen = new Set();
+  let current = error;
+  while (current && !seen.has(current) && chain.length < 5) {
+    chain.push(current);
+    seen.add(current);
+    current = current.cause;
+  }
+  return chain;
 }
 
-function retryDelay(attempt, signal) {
-  const delayMs = 500 * 2 ** attempt + Math.floor(Math.random() * 250);
+export function llmErrorDetails(error) {
+  const chain = errorChain(error);
+  const code = chain.map((item) => item?.code).find((value) => typeof value === 'string') ?? '';
+  const statusCode = chain.map((item) => item?.statusCode).find(Number.isFinite) ?? null;
+  return {
+    name: typeof error?.name === 'string' ? error.name : 'Error',
+    message: typeof error?.message === 'string' ? error.message : 'unknown',
+    code,
+    statusCode,
+  };
+}
+
+function retryableLlmError(error) {
+  if (error?.name === 'AbortError') return false;
+  const chain = errorChain(error);
+  if (chain.some((item) => [408, 409, 429, 500, 502, 503, 504].includes(item?.statusCode))) return true;
+  if (chain.some((item) => RETRYABLE_NETWORK_CODES.has(item?.code))) return true;
+  const messages = chain.map((item) => String(item?.message ?? '')).join(' ');
+  return /fetch failed|connection (?:closed|reset)|socket|overload|try again|temporar|timeout|rate.?limit|capacity|繁忙|稍后重试/i.test(messages);
+}
+
+function retryDelay(delayMs, signal) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, delayMs);
-    signal?.addEventListener('abort', () => {
+    const onAbort = () => {
       clearTimeout(timer);
       reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
-    }, { once: true });
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
-async function* retryBeforeFirstToken(createStream, signal, maxAttempts = 3) {
+async function* retryBeforeFirstToken(createStream, signal, onRetry, maxAttempts = 3) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    let yielded = false;
+    let contentYielded = false;
     try {
       for await (const token of createStream()) {
-        yielded = true;
+        if (/\S/u.test(String(token))) contentYielded = true;
         yield token;
+      }
+      if (!contentYielded) {
+        const error = new Error('LLM stream ended before the first output token');
+        error.code = 'LLM_EMPTY_STREAM';
+        throw error;
       }
       return;
     } catch (error) {
-      if (yielded || attempt + 1 >= maxAttempts || !retryableLlmError(error)) throw error;
-      await retryDelay(attempt, signal);
+      if (contentYielded || attempt + 1 >= maxAttempts || !retryableLlmError(error)) throw error;
+      const delayMs = 500 * 2 ** attempt + Math.floor(Math.random() * 250);
+      await onRetry?.({
+        attempt: attempt + 2,
+        maxAttempts,
+        delayMs,
+        error: llmErrorDetails(error),
+      });
+      await retryDelay(delayMs, signal);
     }
   }
 }
@@ -205,7 +252,7 @@ async function* callDedicatedApi(config, system, user, signal) {
   }
 }
 
-export async function generateInterviewAnswer({ config, master, session, transcriptContext, signal, onToken, onReplace }) {
+export async function generateInterviewAnswer({ config, master, session, transcriptContext, signal, onToken, onReplace, onRetry }) {
   const currentQuestion = transcriptContext || '面试官刚才的问题';
   if (looksLikeExfiltration(currentQuestion)) {
     await onToken?.(SAFE_REFUSAL);
@@ -228,7 +275,7 @@ export async function generateInterviewAnswer({ config, master, session, transcr
   } else {
     createStream = () => callDedicatedApi(config, system, user, signal);
   }
-  const stream = retryBeforeFirstToken(createStream, signal);
+  const stream = retryBeforeFirstToken(createStream, signal, onRetry);
   let answer = '';
   let contentStarted = false;
   let blocked = false;

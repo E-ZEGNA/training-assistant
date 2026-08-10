@@ -89,6 +89,7 @@ function friendlyError(error) {
     too_many_attempts: '激活尝试过于频繁，请稍后再试。',
     no_transcript_yet: '还没有识别到面试官的问题，请等转写出现后再试。',
     answer_rate_limited: '请求过于频繁，请稍后再试。',
+    answer_in_progress: '上一条回答仍在生成中，请稍候。',
     answer_generation_failed: '模型生成失败，请稍后重试。',
     answer_stream_interrupted: '回答传输中断，请重新生成。',
     session_not_found: '本场会话已过期，请结束后重新开始。',
@@ -112,6 +113,7 @@ function wireClientEvents() {
   serviceClient.on('status', (event) => send('audio:status', event));
   serviceClient.on('answer-token', (event) => send('answer:token', event));
   serviceClient.on('answer-replace', (event) => send('answer:replace', event));
+  serviceClient.on('answer-retry', (event) => send('answer:retry', event));
   serviceClient.on('answer-done', (event) => send('answer:done', event));
 }
 
