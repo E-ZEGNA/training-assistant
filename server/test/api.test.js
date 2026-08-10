@@ -6,14 +6,14 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createApplication } from '../src/app.js';
 
-async function fixture() {
+async function fixture({ llm = {} } = {}) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'interview-api-'));
   const config = {
     host: '127.0.0.1', port: 0, publicBaseUrl: '', dataDir,
     masterEncryptionKey: randomBytes(32), adminApiKey: 'admin-secret', studentTokenSecret: 'student-secret',
     activationCodes: new Map([['activate-me', 'student-1'], ['activate-other', 'student-2']]), sessionTtlMs: 60_000, maxSupplementChars: 30_000,
     persistenceQueueLimit: 1000, requireStudentProvider: false,
-    sttProvider: 'mock', seedAsr: {}, llm: { provider: 'api', codexConfigPath: '', codexAuthPath: '', baseUrl: 'http://invalid', apiKey: '', model: 'mock', reasoningEffort: 'low' },
+    sttProvider: 'mock', seedAsr: {}, llm: { provider: 'api', codexConfigPath: '', codexAuthPath: '', baseUrl: 'http://invalid', apiKey: '', model: 'mock', reasoningEffort: 'low', ...llm },
     xiaomuai: {
       baseUrl: 'https://xiaomuai.cn/v1', llmModel: 'gpt-5.6-terra', sttModel: 'seed-asr', timeoutMs: 100,
       fetchImpl: async () => new Response(JSON.stringify({ data: [{ id: 'gpt-5.6-terra' }] }), { status: 200 }),
@@ -124,6 +124,39 @@ test('failed answer generation does not advance the answered transcript boundary
     assert.match(await answerResponse.text(), /answer_generation_failed/);
     assert.match(application.sessionStore.context(session).text, /请介绍项目/);
   } finally {
+    await application.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('answer generation retries once in the same stream after a model failure', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (url, options) => {
+    if (!String(url).endsWith('/chat/completions')) return originalFetch(url, options);
+    calls += 1;
+    const body = calls === 1
+      ? 'event: message\ndata: {"error":{"message":"temporary upstream failure"}}\n\n\n'
+      : 'data: {"choices":[{"delta":{"content":"重试成功"}}]}\n\ndata: [DONE]\n\n';
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  };
+  const { application, baseUrl, dataDir } = await fixture({ llm: { apiKey: 'test-key', model: 'mock' } });
+  try {
+    await application.masterStore.put({ text: '回答重试测试主线程资料。'.repeat(4), version: 'v1' });
+    const student = await activate(baseUrl);
+    const created = await fetch(`${baseUrl}/v1/sessions`, { method: 'POST', headers: student.headers, body: JSON.stringify({ supplement: '' }) });
+    const sessionInfo = await created.json();
+    const session = application.sessionStore.get(sessionInfo.id, 'student-1');
+    application.sessionStore.addTranscript(session, 'system', { utteranceId: 'retry-question', text: '请介绍项目', final: true });
+    const response = await fetch(`${baseUrl}/v1/sessions/${sessionInfo.id}/answer`, { method: 'POST', headers: student.headers, body: '{}' });
+    const body = await response.text();
+    assert.equal(response.status, 200);
+    assert.equal(calls, 2);
+    assert.match(body, /event: replace\ndata: \{"text":""\}/);
+    assert.match(body, /event: token\ndata: \{"token":"重试成功"\}/);
+    assert.match(body, /event: done/);
+  } finally {
+    globalThis.fetch = originalFetch;
     await application.close();
     await rm(dataDir, { recursive: true, force: true });
   }

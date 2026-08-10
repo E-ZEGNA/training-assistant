@@ -188,15 +188,29 @@ export function createApplication(config) {
         });
         startSse(res);
         try {
-          const answer = await generateInterviewAnswer({
-            config,
-            master,
-            session,
-            transcriptContext: transcriptContext.text,
-            signal: controller.signal,
-            onToken: (token) => sendSse(res, 'token', { token }),
-            onReplace: (text) => sendSse(res, 'replace', { text }),
-          });
+          let answer;
+          let lastError;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              answer = await generateInterviewAnswer({
+                config,
+                master,
+                session,
+                transcriptContext: transcriptContext.text,
+                signal: controller.signal,
+                onToken: (token) => sendSse(res, 'token', { token }),
+                onReplace: (text) => sendSse(res, 'replace', { text }),
+              });
+              lastError = null;
+              break;
+            } catch (error) {
+              lastError = error;
+              if (error?.name === 'AbortError' || attempt === 1) throw error;
+              log('answer_retry', { sessionId: session.id, studentId: claims.sub, attempt: attempt + 1 });
+              sendSse(res, 'replace', { text: '' });
+            }
+          }
+          if (lastError || !answer) throw lastError ?? new Error('LLM returned an empty answer');
           sessionStore.markAnswered(session, transcriptContext.revision);
           const savedAnswer = session.answerHistory.at(-1);
           if (savedAnswer) historyStore.recordAnswer(session, savedAnswer);
