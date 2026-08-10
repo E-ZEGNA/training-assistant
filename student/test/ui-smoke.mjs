@@ -22,6 +22,7 @@ const pageErrors = [];
 const packagedExecutable = process.env.PACKAGED_EXE;
 const realAudio = process.env.STUDENT_REAL_AUDIO === '1';
 const launchEnv = { ...process.env };
+launchEnv.INTERVIEW_SERVER_URL ||= envText.match(/^PUBLIC_BASE_URL=(.+)$/m)?.[1] ?? 'http://127.0.0.1:8787';
 if (realAudio) delete launchEnv.STUDENT_E2E;
 else launchEnv.STUDENT_E2E = '1';
 const application = await electron.launch({
@@ -45,7 +46,17 @@ try {
 
   await page.locator('#activation-code').fill(activationCode);
   await page.locator('#activate-button').click();
-  await page.locator('#activated-row').waitFor({ state: 'visible' });
+  try {
+    await page.locator('#activated-row').waitFor({ state: 'visible' });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => ({
+      connection: document.getElementById('connection-summary')?.textContent,
+      header: document.getElementById('header-status')?.textContent,
+      requirement: document.getElementById('start-requirement')?.textContent,
+      toast: document.getElementById('toast')?.textContent,
+    }));
+    throw new Error(`Activation UI failed: ${JSON.stringify(diagnostics)}; ${error.message}`);
+  }
   await page.waitForFunction(() => document.getElementById('start-button')?.disabled === false, null, { timeout: 15_000 });
   await page.locator('#start-requirement').getByText('准备完成，可以开始面试').waitFor();
   await page.locator('#supplement').fill('本场应聘 ML Infra，重点考察 GPU 调度与训练稳定性。');

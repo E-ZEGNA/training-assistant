@@ -24,6 +24,7 @@ const executablePath = process.env.PACKAGED_EXE;
 if (!executablePath) throw new Error('PACKAGED_EXE must point to the installed student application');
 const realStt = process.env.STT_REAL === '1';
 const launchEnv = { ...process.env };
+launchEnv.INTERVIEW_SERVER_URL ||= envText.match(/^PUBLIC_BASE_URL=(.+)$/m)?.[1] ?? 'http://127.0.0.1:8787';
 delete launchEnv.STUDENT_E2E;
 const application = await electron.launch({
   executablePath,

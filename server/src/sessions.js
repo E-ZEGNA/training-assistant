@@ -23,6 +23,9 @@ export class SessionStore {
       throw error;
     }
     const master = await this.masterStore.get();
+    for (const existing of [...this.sessions.values()]) {
+      if (existing.studentId === studentId) this.end(existing.id, studentId);
+    }
     const now = Date.now();
     const session = {
       id: randomUUID(),
@@ -33,7 +36,9 @@ export class SessionStore {
       transcripts: [],
       partialByUtterance: new Map(),
       audioStreams: new Map(),
+      clientSockets: new Map(),
       answerHistory: [],
+      answerInProgress: false,
       transcriptRevision: 0,
       answeredRevision: 0,
       hotwords: buildHotwords(master.text, supplement),
@@ -100,14 +105,16 @@ export class SessionStore {
   }
 
   end(id, studentId) {
-    const session = this.get(id, studentId);
-    if (!session) return false;
+    const session = this.sessions.get(id);
+    if (!session || session.studentId !== studentId) return false;
     for (const stream of session.audioStreams.values()) stream.stop();
+    for (const socket of session.clientSockets.values()) socket.close(1000, 'session ended');
     session.supplement = '';
     session.hotwords = [];
     session.transcripts = [];
     session.partialByUtterance.clear();
     session.answerHistory = [];
+    session.answerInProgress = false;
     session.transcriptRevision = 0;
     session.answeredRevision = 0;
     this.sessions.delete(id);

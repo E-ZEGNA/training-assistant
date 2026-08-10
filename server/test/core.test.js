@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { MasterPackStore } from '../src/crypto-store.js';
+import { StudentBindingStore } from '../src/binding-store.js';
 import { issueStudentToken, verifyStudentDevice, verifyStudentToken } from '../src/auth.js';
+import { getClientIp, normalizeIp } from '../src/client-ip.js';
 import { buildHotwords, createVerbatimLeakGuard, hasVerbatimLeak, looksLikeExfiltration, retrieveChunks } from '../src/retrieval.js';
 import { buildStartRequest, decodeFrame, encodeFrame, MockAsrStream, SeedAsrStream } from '../src/seed-asr.js';
 import { buildInterviewPrompt, generateInterviewAnswer, readSseJson } from '../src/llm.js';
@@ -28,13 +30,40 @@ test('master pack is encrypted at rest and round-trips', async () => {
 
 test('student token rejects tampering and expiration', () => {
   const secret = 'token-secret-for-tests';
-  const token = issueStudentToken({ studentId: 'student-a', deviceId: 'device-12345678' }, secret, 60_000);
+  const token = issueStudentToken({ studentId: 'student-a', deviceId: 'device-12345678', bindingId: 'binding-a' }, secret, 60_000);
   assert.equal(verifyStudentToken(token, secret).sub, 'student-a');
   assert.equal(verifyStudentDevice(verifyStudentToken(token, secret), 'device-12345678'), true);
   assert.equal(verifyStudentDevice(verifyStudentToken(token, secret), 'device-87654321'), false);
   assert.equal(verifyStudentToken(`${token}x`, secret), null);
-  const expired = issueStudentToken({ studentId: 'student-a', deviceId: 'device-12345678' }, secret, -1);
+  const expired = issueStudentToken({ studentId: 'student-a', deviceId: 'device-12345678', bindingId: 'binding-a' }, secret, -1);
   assert.equal(verifyStudentToken(expired, secret), null);
+});
+
+test('student binding persists without raw device or IP values', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'interview-bindings-'));
+  try {
+    const first = new StudentBindingStore(directory, 'binding-secret');
+    const activated = first.activate('student-a', 'device-12345678', '203.0.113.10');
+    assert.equal(activated.ok, true);
+    const disk = await readFile(path.join(directory, 'student-bindings.json'), 'utf8');
+    assert.equal(disk.includes('device-12345678'), false);
+    assert.equal(disk.includes('203.0.113.10'), false);
+    const restored = new StudentBindingStore(directory, 'binding-secret');
+    assert.equal(restored.verify({
+      studentId: 'student-a', bindingId: activated.binding.bindingId, deviceId: 'device-12345678', clientIp: '203.0.113.10',
+    }), true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('client IP trusts only a valid X-Real-IP when proxy trust is explicit', () => {
+  const request = { socket: { remoteAddress: '::ffff:127.0.0.1' }, headers: { 'x-real-ip': '203.0.113.9' } };
+  assert.equal(getClientIp(request, false), '127.0.0.1');
+  assert.equal(getClientIp(request, true), '203.0.113.9');
+  request.headers['x-real-ip'] = '203.0.113.9, 198.51.100.3';
+  assert.equal(getClientIp(request, true), '127.0.0.1');
+  assert.equal(normalizeIp('not-an-ip'), null);
 });
 
 test('retrieval selects technical evidence and leak guards detect unsafe output', () => {
@@ -97,6 +126,57 @@ test('short model output is forwarded before the upstream stream closes', async 
   assert.equal(answer, '第一段第二段第三段');
   assert.deepEqual(tokens.map(({ token }) => token), ['第一段', '第二段', '第三段']);
   assert.equal(tokens.every(({ upstreamClosed: closed }) => closed === false), true);
+});
+
+test('Responses API provider uses server credentials and streams output text', async (context) => {
+  const encoder = new TextEncoder();
+  context.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, 'https://gateway.example/v1/responses');
+    assert.equal(options.headers.authorization, 'Bearer server-only-token');
+    const payload = JSON.parse(options.body);
+    assert.equal(payload.model, 'gpt-5.6-sol');
+    assert.equal(payload.reasoning.effort, 'low');
+    assert.equal(payload.store, false);
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"服务端流式回答"}\n\n'));
+        controller.close();
+      },
+    }), { status: 200 });
+  });
+
+  const answer = await generateInterviewAnswer({
+    config: { llm: { provider: 'responses-api', apiKey: 'server-only-token', baseUrl: 'https://gateway.example/v1', model: 'gpt-5.6-sol', reasoningEffort: 'low', contextWindowTokens: 1_000_000 } },
+    master: { text: '主线程证据与测试输出无逐字重合'.repeat(20) },
+    session: { supplement: '', answerHistory: [] },
+    transcriptContext: '介绍一下项目',
+  });
+  assert.equal(answer, '服务端流式回答');
+});
+
+test('LLM retries a transient failure only before the first output token', async (context) => {
+  let calls = 0;
+  const encoder = new TextEncoder();
+  context.mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    const data = calls === 1
+      ? { type: 'error', error: { message: 'Our servers are currently overloaded. Please try again later.' } }
+      : { type: 'response.output_text.delta', delta: '重试成功' };
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        controller.close();
+      },
+    }), { status: 200 });
+  });
+  const answer = await generateInterviewAnswer({
+    config: { llm: { provider: 'responses-api', apiKey: 'test', baseUrl: 'https://gateway.example/v1', model: 'test', reasoningEffort: 'low', contextWindowTokens: 1_000_000 } },
+    master: { text: '主线程证据'.repeat(30) },
+    session: { supplement: '', answerHistory: [] },
+    transcriptContext: '介绍项目',
+  });
+  assert.equal(answer, '重试成功');
+  assert.equal(calls, 2);
 });
 
 test('verbatim output is replaced after the copied prefix is reclaimed', async (context) => {
@@ -246,6 +326,27 @@ test('SessionStore keeps simultaneous partials until the answer snapshot revisio
     assert.ok(context.revision > 0);
     store.markAnswered(session, context.revision);
     assert.equal(store.context(session).text, '');
+  } finally {
+    store.close();
+  }
+});
+
+test('SessionStore replaces a prior student session and removes expired sessions', async () => {
+  const store = new SessionStore(
+    { maxSupplementChars: 30_000, sessionTtlMs: 60_000, sttProvider: 'mock', seedAsr: {} },
+    { get: async () => ({ text: '演示主线程资料' }) },
+  );
+  try {
+    const first = await store.create('student-1', '旧会话');
+    const second = await store.create('student-1', '新会话');
+    assert.equal(store.sessions.has(first.id), false);
+    assert.equal(store.sessions.has(second.id), true);
+    let socketClosed = false;
+    second.clientSockets.set('system', { close: () => { socketClosed = true; } });
+    second.expiresAt = Date.now() - 1;
+    store.cleanup();
+    assert.equal(store.sessions.has(second.id), false);
+    assert.equal(socketClosed, true);
   } finally {
     store.close();
   }

@@ -21,6 +21,24 @@ test('activation token uses Electron safeStorage and renderer never receives it'
   assert.match(config, /safeStorage\.decryptString/);
   const publicMethod = config.slice(config.indexOf('publicValue()'), config.indexOf('update(patch)'));
   assert.doesNotMatch(publicMethod, /activationToken:/);
+  assert.doesNotMatch(publicMethod, /serverUrl:/);
+});
+
+test('production service address is internal and not editable by the renderer', () => {
+  const config = read('electron/config-store.js');
+  const renderer = read('renderer/app.js');
+  const html = read('renderer/index.html');
+  assert.match(config, /https:\/\/119\.29\.213\.205/);
+  assert.match(config, /process\.env\.INTERVIEW_SERVER_URL/);
+  assert.doesNotMatch(renderer, /server-url|saveServerUrl/);
+  assert.doesNotMatch(html, /server-url|服务地址/);
+});
+
+test('activation failures are translated without exposing internal error codes', () => {
+  const main = read('electron/main.js');
+  assert.match(main, /activation_already_bound: '该激活码已绑定其他设备或网络/);
+  assert.match(main, /invalid_activation: '激活码无效/);
+  assert.match(main, /throw new Error\(friendlyError\(error\)\)/);
 });
 
 test('renderer is isolated and remote navigation is blocked', () => {
