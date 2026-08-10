@@ -140,7 +140,7 @@ test('activation binds the code while authenticated requests tolerate public IP 
     assert.equal(first.status, 200);
     const { token } = await first.json();
     assert.equal((await activate('device-87654321', '203.0.113.10')).status, 409);
-    assert.equal((await activate('device-12345678', '203.0.113.11')).status, 409);
+    assert.equal((await activate('device-12345678', '203.0.113.11')).status, 200);
 
     await application.masterStore.put({ studentId: 'student-1', text: '用于公网 IP 漂移鉴权测试的独立主线程包内容。', version: 'v1' });
     const session = await fetch(`${baseUrl}/v1/sessions`, {

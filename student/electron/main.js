@@ -84,7 +84,7 @@ async function triggerAnswer(source) {
 function friendlyError(error) {
   const mapping = {
     invalid_activation: '激活码无效，请检查后重新输入。',
-    activation_already_bound: '该激活码已绑定其他设备或网络，请联系发布方重置。',
+    activation_already_bound: '该激活码已绑定其他设备，请联系发布方重置。',
     activation_revoked: '该激活码已停用，请联系发布方。',
     too_many_attempts: '激活尝试过于频繁，请稍后再试。',
     no_transcript_yet: '还没有识别到面试官的问题，请等转写出现后再试。',

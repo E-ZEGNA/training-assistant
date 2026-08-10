@@ -63,9 +63,12 @@ export class StudentBindingStore {
     const existing = this.bindings.get(studentId);
     if (existing) {
       if (existing.status === 'revoked') return { ok: false, reason: 'revoked' };
-      if (!sameFingerprint(existing.deviceHash, deviceHash) || !sameFingerprint(existing.ipHash, ipHash)) {
+      if (!sameFingerprint(existing.deviceHash, deviceHash)) {
         return { ok: false, reason: 'already_bound' };
       }
+      // The device remains the binding anchor; refresh the recorded IP when a
+      // legitimate device moves between networks so it can recover its token.
+      if (!sameFingerprint(existing.ipHash, ipHash)) existing.ipHash = ipHash;
       existing.updatedAt = new Date().toISOString();
       this.persist();
       return { ok: true, binding: existing };
