@@ -141,6 +141,8 @@ input::placeholder, textarea::placeholder { color: #99a39e; }
 .transcript-item .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .answer-output { min-height: 170px; max-height: 280px; overflow-y: auto; border: 1px solid #ccd8d2; border-left: 4px solid var(--green); border-radius: 6px; background: var(--surface); box-shadow: var(--shadow); font-size: 14px; line-height: 1.72; }
+.answer-output:has(> .empty-state) { display: grid; place-items: center; }
+.answer-output > .empty-state { width: 100%; min-height: 0; padding: 16px; transform: translateX(-1.5px); }
 .answer-item { padding: 14px 17px 16px; }
 .answer-item + .answer-item { border-top: 1px solid var(--line); }
 .answer-index { margin-bottom: 5px; color: var(--green); font-size: 10px; font-weight: 700; line-height: 16px; }

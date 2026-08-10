@@ -17,12 +17,15 @@ const state = {
   answerPending: false,
   answerCount: 0,
   currentAnswerNode: null,
+  answerTokenBuffer: '',
+  answerRenderFrame: null,
   captures: new Map(),
-  partialNodes: new Map(),
-  finalNodes: new Map(),
+  transcriptSegments: [],
+  activeTranscriptSegment: null,
+  audioStatus: { system: 'idle', mic: 'disabled' },
+  audioErrors: {},
+  audioDeviceLabel: '系统音频已连接',
 };
-
-const TRANSCRIPT_MERGE_WINDOW_MS = 1800;
 
 function refreshIcons() {
   window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
@@ -182,9 +185,34 @@ function stopCaptures() {
   state.captures.clear();
 }
 
+function flushAnswerTokens() {
+  if (state.answerRenderFrame !== null) cancelAnimationFrame(state.answerRenderFrame);
+  state.answerRenderFrame = null;
+  const token = state.answerTokenBuffer;
+  state.answerTokenBuffer = '';
+  if (!token || !state.currentAnswerNode) return;
+  state.currentAnswerNode.querySelector('.answer-text').textContent += token;
+  elements['answer-output'].scrollTop = elements['answer-output'].scrollHeight;
+}
+
+function scheduleAnswerTokenFlush() {
+  if (state.answerRenderFrame !== null) return;
+  state.answerRenderFrame = requestAnimationFrame(() => {
+    state.answerRenderFrame = null;
+    flushAnswerTokens();
+  });
+}
+
+function resetAnswerTokenBuffer() {
+  if (state.answerRenderFrame !== null) cancelAnimationFrame(state.answerRenderFrame);
+  state.answerRenderFrame = null;
+  state.answerTokenBuffer = '';
+}
+
 function resetMeetingUi() {
-  state.partialNodes.clear();
-  state.finalNodes.clear();
+  resetAnswerTokenBuffer();
+  state.transcriptSegments = [];
+  state.activeTranscriptSegment = null;
   state.answerCount = 0;
   state.currentAnswerNode = null;
   elements['transcript-list'].innerHTML = '<div class="empty-state"><i data-lucide="waves"></i><span>等待面试官声音</span></div>';
@@ -195,12 +223,31 @@ function resetMeetingUi() {
   refreshIcons();
 }
 
+function beginTranscriptSegment() {
+  state.activeTranscriptSegment = null;
+}
+
+function renderAudioStatus() {
+  const systemState = state.audioStatus.system;
+  const micState = state.audioStatus.mic;
+  let text = state.audioDeviceLabel;
+  if (systemState === 'failed') text = '系统音频转写暂不可用';
+  else if (systemState === 'reconnecting') text = '系统音频网络重连中';
+  else if (micState === 'failed') text = `${state.audioDeviceLabel}；麦克风转写暂不可用`;
+  else if (micState === 'reconnecting') text = `${state.audioDeviceLabel}；麦克风网络重连中`;
+  else if (micState === 'connected') text = `${state.audioDeviceLabel} + 麦克风`;
+  elements['audio-state'].textContent = text;
+  elements['audio-state'].title = state.audioErrors.system ?? state.audioErrors.mic ?? text;
+}
+
 async function startMeeting() {
   if (state.meeting) return;
   elements['start-button'].disabled = true;
   const supplement = elements.supplement.value;
   const microphoneEnabled = elements['microphone-enabled'].checked;
   try {
+    state.audioStatus = { system: 'connecting', mic: microphoneEnabled ? 'connecting' : 'disabled' };
+    state.audioErrors = {};
     state.config = await api.updateConfig({ microphoneEnabled });
     const session = await api.startSession({ supplement, microphoneEnabled });
     elements.supplement.value = '';
@@ -217,9 +264,8 @@ async function startMeeting() {
     elements['setup-view'].classList.add('hidden');
     elements['meeting-view'].classList.remove('hidden');
     elements['header-status'].textContent = '面试进行中';
-    const systemAudio = session.audioDevice ? `系统音频：${session.audioDevice}` : '系统音频已连接';
-    elements['audio-state'].textContent = microphoneEnabled ? `${systemAudio} + 麦克风` : systemAudio;
-    elements['audio-state'].title = elements['audio-state'].textContent;
+    state.audioDeviceLabel = session.audioDevice ? `系统音频：${session.audioDevice}` : '系统音频已连接';
+    renderAudioStatus();
   } catch (error) {
     stopCaptures();
     showToast(errorMessage(error), 'error');
@@ -248,47 +294,55 @@ function renderTranscript(event) {
   const empty = elements['transcript-list'].querySelector('.empty-state');
   empty?.remove();
   const channel = event.channel === 'mic' ? 'mic' : 'system';
-  let node = state.partialNodes.get(channel);
   const text = String(event.text ?? '').trim();
   if (!text) return;
-  const previousFinal = state.finalNodes.get(channel);
-  const shouldMerge = event.final && previousFinal
-    && Date.now() - previousFinal.at <= TRANSCRIPT_MERGE_WINDOW_MS;
-  if (event.final && shouldMerge) {
-    node = previousFinal.node;
-    const previousText = node.querySelector('.text').textContent;
-    const partialNode = state.partialNodes.get(channel);
-    if (partialNode && partialNode !== node) partialNode.remove();
-    if (previousText === text) {
-      node.title = previousText;
-      state.finalNodes.set(channel, { node, at: Date.now() });
-      state.partialNodes.delete(channel);
-      return;
-    }
-    const separator = /[\u4e00-\u9fff]$/.test(previousText) && /^[\u4e00-\u9fff]/.test(text) ? '' : ' ';
-    node.querySelector('.text').textContent = `${previousText}${separator}${text}`;
-    node.title = node.querySelector('.text').textContent;
-    state.finalNodes.set(channel, { node, at: Date.now() });
-    state.partialNodes.delete(channel);
-    elements['transcript-list'].scrollTop = elements['transcript-list'].scrollHeight;
-    return;
+  let segment = state.activeTranscriptSegment;
+  if (!segment) {
+    segment = { blocks: new Map(), entries: [], entriesByKey: new Map() };
+    state.transcriptSegments.push(segment);
+    state.activeTranscriptSegment = segment;
   }
-  if (!node) {
-    node = document.createElement('div');
-    node.className = `transcript-item ${channel} partial`;
+  const hasUtteranceId = event.utteranceId != null;
+  const utteranceKey = `${channel}:${hasUtteranceId ? event.utteranceId : 'current'}`;
+  let entry = segment.entriesByKey.get(utteranceKey);
+  if (!hasUtteranceId && entry?.final) entry = null;
+  if (!entry) {
+    entry = { channel, text, final: event.final === true };
+    segment.entries.push(entry);
+    segment.entriesByKey.set(utteranceKey, entry);
+  } else {
+    entry.text = text;
+    entry.final = event.final === true;
+  }
+  if (!hasUtteranceId && entry.final) segment.entriesByKey.delete(utteranceKey);
+  let block = segment.blocks.get(channel);
+  if (!block) {
+    const node = document.createElement('div');
+    node.className = `transcript-item ${channel}`;
     node.innerHTML = '<span class="speaker"></span><span class="text"></span>';
+    node.querySelector('.speaker').textContent = channel === 'mic' ? '我' : '面试官';
     elements['transcript-list'].appendChild(node);
-    state.partialNodes.set(channel, node);
+    block = { node, channel };
+    segment.blocks.set(channel, block);
   }
-  node.querySelector('.speaker').textContent = channel === 'mic' ? '我' : '面试官';
-  node.querySelector('.text').textContent = text;
-  node.title = text;
-  if (event.final) {
-    node.classList.remove('partial');
-    state.partialNodes.delete(channel);
-    state.finalNodes.set(channel, { node, at: Date.now() });
-  }
-  while (elements['transcript-list'].children.length > 80) elements['transcript-list'].firstElementChild.remove();
+  const blockEntries = segment.entries.filter((candidate) => candidate.channel === channel);
+  const blockText = blockEntries.reduce((combined, candidate) => {
+    if (!combined) return candidate.text;
+    const leftIsCjk = /[\u3400-\u9fff]$/u.test(combined);
+    const rightIsCjk = /^[\u3400-\u9fff]/u.test(candidate.text);
+    const startsWithPunctuation = /^[\p{P}\p{S}]/u.test(candidate.text);
+    const endsWithCjkPunctuation = /[，。！？；：、）】》“”‘’]$/u.test(combined);
+    const separator = /\s$/u.test(combined)
+      || startsWithPunctuation
+      || endsWithCjkPunctuation
+      || (leftIsCjk && rightIsCjk)
+      ? ''
+      : ' ';
+    return `${combined}${separator}${candidate.text}`;
+  }, '');
+  block.node.querySelector('.text').textContent = blockText;
+  block.node.classList.toggle('partial', blockEntries.some((candidate) => !candidate.final));
+  block.node.title = blockText;
   elements['transcript-list'].scrollTop = elements['transcript-list'].scrollHeight;
   elements['transcript-state'].textContent = event.final ? '已确认' : '识别中';
 }
@@ -339,12 +393,17 @@ function beginHotkeyRecording() {
 
 api.onTranscript((event) => state.meeting && renderTranscript(event));
 api.onAudioStatus((event) => {
+  const channel = event.channel === 'mic' ? 'mic' : 'system';
+  state.audioStatus[channel] = event.state;
+  if (event.error) state.audioErrors[channel] = event.error;
+  else delete state.audioErrors[channel];
   if (!state.meeting) return;
-  const labels = { connected: '音频已连接', reconnecting: '网络重连中', failed: '转写暂不可用' };
-  elements['audio-state'].textContent = labels[event.state] ?? elements['audio-state'].textContent;
+  renderAudioStatus();
 });
 api.onAnswerStarted(() => {
   if (!state.meeting) return;
+  beginTranscriptSegment();
+  resetAnswerTokenBuffer();
   state.answerPending = true;
   state.answerCount += 1;
   elements['answer-button'].disabled = true;
@@ -360,14 +419,16 @@ api.onAnswerStarted(() => {
 });
 api.onAnswerToken(({ token }) => {
   if (!state.meeting || !state.currentAnswerNode) return;
-  state.currentAnswerNode.querySelector('.answer-text').textContent += token;
-  elements['answer-output'].scrollTop = elements['answer-output'].scrollHeight;
+  state.answerTokenBuffer += token;
+  scheduleAnswerTokenFlush();
 });
 api.onAnswerReplace(({ text }) => {
   if (!state.meeting || !state.currentAnswerNode) return;
+  resetAnswerTokenBuffer();
   state.currentAnswerNode.querySelector('.answer-text').textContent = text;
 });
 api.onAnswerDone(() => {
+  flushAnswerTokens();
   state.answerPending = false;
   elements['answer-button'].disabled = false;
   state.currentAnswerNode?.classList.remove('generating');
@@ -375,6 +436,7 @@ api.onAnswerDone(() => {
   elements['answer-state'].textContent = '已完成';
 });
 api.onAnswerError(({ message }) => {
+  flushAnswerTokens();
   state.answerPending = false;
   elements['answer-button'].disabled = false;
   state.currentAnswerNode?.classList.remove('generating');

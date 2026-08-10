@@ -51,6 +51,17 @@ try {
   await page.locator('#supplement').fill('本场应聘 ML Infra，重点考察 GPU 调度与训练稳定性。');
   await page.locator('#start-button').click();
   await page.locator('#meeting-view').waitFor({ state: 'visible', timeout: 15_000 });
+  const answerEmptyAlignment = await page.evaluate(() => {
+    const panel = document.getElementById('answer-output').getBoundingClientRect();
+    const empty = document.querySelector('#answer-output > .empty-state').getBoundingClientRect();
+    return {
+      horizontal: Math.abs((panel.left + panel.width / 2) - (empty.left + empty.width / 2)),
+      vertical: Math.abs((panel.top + panel.height / 2) - (empty.top + empty.height / 2)),
+    };
+  });
+  if (answerEmptyAlignment.horizontal > 1 || answerEmptyAlignment.vertical > 1) {
+    throw new Error(`Answer empty state is not centered: ${JSON.stringify(answerEmptyAlignment)}`);
+  }
   if (realAudio) {
     const player = spawn('powershell.exe', [
       '-NoProfile',
@@ -68,18 +79,63 @@ try {
     contents.send('transcript:update', { channel: 'system', text: '问题第一段', final: true });
     contents.send('transcript:update', { channel: 'system', text: '问题第二段', final: true });
     contents.send('answer:started', { source: 'test' });
-    contents.send('answer:token', { token: '第一题的建议回答会继续保留。' });
+    for (let index = 0; index < 120; index += 1) {
+      contents.send('answer:token', { token: index === 0 ? '第一题' : '流' });
+      if (index === 40) {
+        contents.send('transcript:update', {
+          channel: 'system', utteranceId: 'during-answer', text: '生成回答期间转写仍然继续', final: false,
+        });
+      }
+    }
     contents.send('answer:done', { answer: '第一题的建议回答会继续保留。' });
     contents.send('answer:started', { source: 'test' });
     contents.send('answer:token', { token: '第二题正在通过流式事件追加。' });
     contents.send('answer:done', { answer: '第二题正在通过流式事件追加。' });
+    for (let index = 0; index < 105; index += 1) {
+      contents.send('transcript:update', {
+        channel: 'system', utteranceId: `history-${index}`, text: `完整转写记录 ${index}：这是一段需要保留的较长内容。`, final: false,
+      });
+    }
+    contents.send('transcript:update', { channel: 'system', utteranceId: 'revised-utterance', text: '重复测试初稿', final: true });
+    contents.send('transcript:update', { channel: 'system', utteranceId: 'revised-utterance', text: '重复测试最终稿', final: true });
   });
   await page.locator('.transcript-item.system .text').first().waitFor();
   const transcriptLine = await page.locator('.transcript-item.system .text').first().textContent();
   if (transcriptLine !== '问题第一段问题第二段') throw new Error(`Transcript segments were not merged: ${transcriptLine}`);
   await page.locator('.answer-item').nth(1).getByText('第二题正在通过流式事件追加。').waitFor();
   if (await page.locator('.answer-item').count() !== 2) throw new Error('Previous answers must remain visible');
-  await page.locator('.answer-item').first().getByText('第一题的建议回答会继续保留。').waitFor();
+  await page.locator('.answer-item').first().getByText(/^第一题流+$/).waitFor();
+  await page.locator('.transcript-item .text').getByText('生成回答期间转写仍然继续').waitFor();
+  if (await page.locator('.transcript-item').count() < 3) throw new Error('Answer-triggered transcript boundaries were not preserved');
+  const transcriptBlocks = await page.locator('.transcript-item .text').allTextContents();
+  if (!transcriptBlocks.some((text) => text.includes('完整转写记录 0') && text.includes('完整转写记录 104'))) {
+    throw new Error('Current answer segment did not retain its full transcript');
+  }
+  const revisedText = await page.locator('.transcript-item .text').evaluateAll((nodes) => nodes.map((node) => node.textContent).filter((text) => text.includes('重复测试')));
+  if (revisedText.length !== 1 || revisedText[0].includes('重复测试初稿') || !revisedText[0].endsWith('重复测试最终稿')) {
+    throw new Error(`Final utterance revision was duplicated: ${JSON.stringify(revisedText)}`);
+  }
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('audio:status', {
+    channel: 'mic', state: 'failed', error: '麦克风测试失败',
+  }));
+  await page.locator('#audio-state').getByText(/系统音频.*麦克风转写暂不可用/).waitFor();
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('audio:status', {
+    channel: 'system', state: 'failed', error: '系统声道测试失败',
+  }));
+  await page.locator('#audio-state').getByText('系统音频转写暂不可用').waitFor();
+  await application.evaluate(({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    contents.send('audio:status', { channel: 'system', state: 'connected' });
+    contents.send('audio:status', { channel: 'mic', state: 'connected' });
+    contents.send('transcript:update', { channel: 'system', utteranceId: 'english-a', text: 'Please explain Java', final: true });
+    contents.send('transcript:update', { channel: 'system', utteranceId: 'english-b', text: 'Please explain JavaScript', final: true });
+  });
+  const transcriptWhiteSpace = await page.locator('.transcript-item .text').last().evaluate((node) => getComputedStyle(node).whiteSpace);
+  if (transcriptWhiteSpace !== 'nowrap') throw new Error('Transcript text must stay on one visual line');
+  const englishTranscript = await page.locator('.transcript-item .text').last().textContent();
+  if (!englishTranscript.includes('Please explain Java Please explain JavaScript')) {
+    throw new Error(`Distinct English utterances were lost or joined without spacing: ${englishTranscript}`);
+  }
   await page.screenshot({ path: path.join(reports, 'student-meeting-560.png') });
 
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(430, 700));

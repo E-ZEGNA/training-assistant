@@ -31,9 +31,11 @@ export class SessionStore {
       createdAt: now,
       expiresAt: now + this.config.sessionTtlMs,
       transcripts: [],
-      partialByChannel: new Map(),
+      partialByUtterance: new Map(),
       audioStreams: new Map(),
       answerHistory: [],
+      transcriptRevision: 0,
+      answeredRevision: 0,
       hotwords: buildHotwords(master.text, supplement),
     };
     this.sessions.set(session.id, session);
@@ -61,26 +63,40 @@ export class SessionStore {
   addTranscript(session, channel, event) {
     const text = String(event.text ?? '').trim();
     if (!text) return;
-    session.partialByChannel.set(channel, text);
+    const revision = ++session.transcriptRevision;
+    const utteranceId = String(event.utteranceId ?? 'current');
+    const partialKey = `${channel}:${utteranceId}`;
+    session.partialByUtterance.set(partialKey, { channel, text, utteranceId, revision });
     if (event.final) {
-      const previous = session.transcripts.at(-1);
-      if (!previous || previous.text !== text || previous.channel !== channel) {
-        session.transcripts.push({ channel, text, at: Date.now() });
-        if (session.transcripts.length > 500) session.transcripts.splice(0, session.transcripts.length - 500);
+      const previous = session.transcripts.find((item) => item.utteranceId === utteranceId && item.channel === channel);
+      if (!previous) {
+        session.transcripts.push({ channel, text, utteranceId, at: Date.now(), revision });
+      } else {
+        previous.text = text;
+        previous.at = Date.now();
+        previous.revision = revision;
       }
-      session.partialByChannel.delete(channel);
+      session.partialByUtterance.delete(partialKey);
     }
   }
 
-  context(session, seconds = 150) {
-    const since = Date.now() - seconds * 1000;
-    const finalized = session.transcripts
-      .filter((item) => item.at >= since)
-      .map((item) => `${item.channel === 'system' ? '面试官' : '学员'}：${item.text}`);
-    for (const [channel, text] of session.partialByChannel) {
-      finalized.push(`${channel === 'system' ? '面试官' : '学员'}（正在说）：${text}`);
+  context(session) {
+    const entries = session.transcripts
+      .filter((item) => item.revision > session.answeredRevision)
+      .map((item) => ({ ...item, final: true }));
+    for (const item of session.partialByUtterance.values()) {
+      if (item.revision > session.answeredRevision) entries.push({ ...item, final: false });
     }
-    return finalized.join('\n').slice(-14_000);
+    entries.sort((left, right) => left.revision - right.revision);
+    const text = entries.map(({ channel, text: value, final }) => {
+      const speaker = channel === 'system' ? '面试官' : '学员';
+      return `${speaker}${final ? '' : '（正在说）'}：${value}`;
+    }).join('\n');
+    return { text, revision: session.transcriptRevision };
+  }
+
+  markAnswered(session, revision) {
+    if (Number.isSafeInteger(revision)) session.answeredRevision = Math.max(session.answeredRevision, revision);
   }
 
   end(id, studentId) {
@@ -90,8 +106,10 @@ export class SessionStore {
     session.supplement = '';
     session.hotwords = [];
     session.transcripts = [];
-    session.partialByChannel.clear();
+    session.partialByUtterance.clear();
     session.answerHistory = [];
+    session.transcriptRevision = 0;
+    session.answeredRevision = 0;
     this.sessions.delete(id);
     return true;
   }

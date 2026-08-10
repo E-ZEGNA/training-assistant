@@ -76,12 +76,47 @@ export function looksLikeExfiltration(question) {
   return /(逐字|完整|原样|verbatim|exact).{0,20}(主线程|主包|系统提示|system prompt|context)|(?:输出|展示|泄露|print|reveal).{0,20}(主线程|主包|系统提示|隐藏指令|hidden prompt)/i.test(question);
 }
 
+function normalizeVerbatimText(text) {
+  return String(text ?? '').replace(/\s+/g, ' ').trim();
+}
+
 export function hasVerbatimLeak(answer, masterText, windowSize = 100) {
-  const normalizedAnswer = answer.replace(/\s+/g, ' ').trim();
-  const normalizedMaster = masterText.replace(/\s+/g, ' ');
+  const normalizedAnswer = normalizeVerbatimText(answer);
+  const normalizedMaster = normalizeVerbatimText(masterText);
   if (normalizedAnswer.length < windowSize) return false;
   for (let offset = 0; offset <= normalizedAnswer.length - windowSize; offset += 1) {
     if (normalizedMaster.includes(normalizedAnswer.slice(offset, offset + windowSize))) return true;
   }
   return false;
+}
+
+export function createVerbatimLeakGuard(masterText, windowSize = 100) {
+  const normalizedMaster = normalizeVerbatimText(masterText);
+  let normalizedAnswer = '';
+  let pendingWhitespace = false;
+
+  return {
+    push(text) {
+      let safeText = '';
+      for (const character of String(text ?? '')) {
+        if (/\s/u.test(character)) {
+          safeText += character;
+          if (normalizedAnswer) pendingWhitespace = true;
+          continue;
+        }
+
+        const separator = pendingWhitespace && normalizedAnswer ? ' ' : '';
+        const nextAnswer = `${normalizedAnswer}${separator}${character}`;
+        if (nextAnswer.length >= windowSize
+          && normalizedMaster.includes(nextAnswer.slice(-windowSize))) {
+          return { safeText, leaked: true };
+        }
+
+        normalizedAnswer = nextAnswer;
+        pendingWhitespace = false;
+        safeText += character;
+      }
+      return { safeText, leaked: false };
+    },
+  };
 }

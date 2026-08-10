@@ -55,6 +55,7 @@ export function loadConfig(overrides = {}) {
       apiKey: overrides.llmApiKey ?? process.env.LLM_API_KEY ?? '',
       model: overrides.llmModel ?? process.env.LLM_MODEL ?? 'gpt-5.6-sol',
       reasoningEffort: overrides.llmReasoningEffort ?? process.env.LLM_REASONING_EFFORT ?? 'low',
+      contextWindowTokens: Number(overrides.llmContextWindowTokens ?? process.env.LLM_CONTEXT_WINDOW_TOKENS ?? 1_000_000),
     },
   };
 }
