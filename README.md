@@ -8,6 +8,7 @@
 - 补充包：学员每场开始时输入，只保存在服务端会话内存，结束或超时后清空。
 - 转写与答案：只保存在当前服务端会话内存，不写客户端数据库或日志。
 - 学员凭据：Windows `safeStorage` 加密保存；机构 API Key、ASR Key 和 LLM Key 不进入客户端。
+- 激活绑定：激活码首次使用后绑定设备和公网 IP；绑定数据只保存不可逆 HMAC，不保存原始设备标识或 IP。
 
 ## 本机启动
 
@@ -45,9 +46,9 @@ SEED_ASR_RESOURCE_ID=volc.seedasr.sauc.duration
 发布时使用机构专用模型 API：
 
 ```dotenv
-LLM_PROVIDER=api
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_API_KEY=<机构专用密钥>
+LLM_PROVIDER=responses-api
+LLM_BASE_URL=https://fushengyunsuan.cn/v1
+LLM_API_KEY=<机构专用密钥，仅保存在服务端>
 LLM_MODEL=gpt-5.6-sol
 LLM_REASONING_EFFORT=low
 ```
@@ -70,3 +71,32 @@ docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
 容器以非 root 用户运行，根文件系统只读，主包密文保存在 `interview-data` 卷。Compose 只监听本机 `127.0.0.1:8787`；对外发布时应在前面配置 HTTPS 反向代理，并将学生端服务地址设为公开 HTTPS 域名。
+
+当前正式客户端地址为 `https://119.29.213.205`，地址内置于客户端且不会显示给学员。公网 Nginx 将 `443` 端口转发到服务器内部的 `127.0.0.1:8787`。
+
+生产环境经本机 Nginx 反代时设置 `TRUST_PROXY=true`。Nginx 必须覆盖而不是透传 `X-Real-IP`，并禁止公网访问 `/v1/admin/`。参考配置见 `deploy/nginx-interview-assistant.conf.example`。
+
+公网 IP 证书使用 Certbot 5.4+ 和 Let’s Encrypt `shortlived` profile 签发，有效期约 6 天，必须配置自动续期及 Nginx reload hook：
+
+```bash
+certbot certonly --webroot -w /www/wwwroot/interview-acme \
+  --preferred-profile shortlived --ip-address 119.29.213.205
+certbot renew --deploy-hook "/www/server/nginx/sbin/nginx -s reload"
+```
+
+管理员在服务器容器内管理学员绑定：
+
+```bash
+docker compose -f deploy/docker-compose.yml exec interview-server node scripts/manage-bindings.mjs list
+docker compose -f deploy/docker-compose.yml exec interview-server node scripts/manage-bindings.mjs revoke student-1
+docker compose -f deploy/docker-compose.yml exec interview-server node scripts/manage-bindings.mjs reset student-1
+```
+
+`revoke` 会立即让已有 Token 失效但保留占用；`reset` 会删除绑定，允许该学员在新的设备或 IP 上重新激活。`STUDENT_TOKEN_SECRET` 轮换后，已有 Token 和绑定均需重置。
+
+发布前可分别验证真实模型和转写链路：
+
+```powershell
+npm --workspace server run smoke:llm
+npm --workspace server run smoke:asr -- ../reports/interview-audio/q01-kubernetes.wav
+```

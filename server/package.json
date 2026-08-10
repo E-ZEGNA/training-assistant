@@ -9,7 +9,10 @@
     "start": "node --env-file-if-exists=.env src/index.js",
     "test": "node --test test/*.test.js",
     "smoke:codex": "node --env-file-if-exists=.env scripts/smoke-codex.mjs",
-    "publish-master": "node scripts/publish-master.mjs"
+    "smoke:llm": "node --env-file-if-exists=.env scripts/smoke-llm.mjs",
+    "smoke:asr": "node --env-file-if-exists=.env scripts/smoke-asr.mjs",
+    "publish-master": "node scripts/publish-master.mjs",
+    "manage-bindings": "node --env-file-if-exists=.env scripts/manage-bindings.mjs"
   },
   "dependencies": {
     "smol-toml": "^1.7.1",

@@ -4,7 +4,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 
 const DEFAULTS = Object.freeze({
-  serverUrl: 'http://127.0.0.1:8787',
+  serverUrl: process.env.INTERVIEW_SERVER_URL?.trim() || 'https://119.29.213.205',
   answerHotkey: 'CommandOrControl+1',
   microphoneEnabled: false,
   activationToken: '',
@@ -25,7 +25,6 @@ class ConfigStore {
   load() {
     try {
       const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
-      this.value.serverUrl = typeof raw.serverUrl === 'string' ? raw.serverUrl : DEFAULTS.serverUrl;
       this.value.answerHotkey = typeof raw.answerHotkey === 'string' ? raw.answerHotkey : DEFAULTS.answerHotkey;
       this.value.microphoneEnabled = raw.microphoneEnabled === true;
       this.value.deviceId = typeof raw.deviceId === 'string' ? raw.deviceId : '';
@@ -39,7 +38,6 @@ class ConfigStore {
 
   publicValue() {
     return {
-      serverUrl: this.value.serverUrl,
       answerHotkey: this.value.answerHotkey,
       microphoneEnabled: this.value.microphoneEnabled,
       activated: Boolean(this.value.activationToken),
@@ -47,11 +45,6 @@ class ConfigStore {
   }
 
   update(patch) {
-    if (typeof patch.serverUrl === 'string') {
-      const url = new URL(patch.serverUrl.trim());
-      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('服务地址必须使用 http 或 https');
-      this.value.serverUrl = url.toString().replace(/\/$/, '');
-    }
     if (typeof patch.answerHotkey === 'string') this.value.answerHotkey = patch.answerHotkey;
     if (typeof patch.microphoneEnabled === 'boolean') this.value.microphoneEnabled = patch.microphoneEnabled;
     this.persist();
@@ -71,7 +64,6 @@ class ConfigStore {
 
   persist() {
     const serialized = {
-      serverUrl: this.value.serverUrl,
       answerHotkey: this.value.answerHotkey,
       microphoneEnabled: this.value.microphoneEnabled,
       deviceId: this.value.deviceId,

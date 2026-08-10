@@ -1,7 +1,7 @@
 const api = window.interviewAPI;
 
 const elements = Object.fromEntries([
-  'header-status', 'setup-view', 'meeting-view', 'connection-summary', 'server-url', 'test-server',
+  'header-status', 'setup-view', 'meeting-view', 'connection-summary',
   'activation-field', 'activation-code', 'activate-button', 'activated-row', 'deactivate-button',
   'supplement', 'supplement-count', 'microphone-enabled', 'hotkey-recorder', 'start-button',
   'start-requirement',
@@ -50,7 +50,6 @@ function displayHotkey(accelerator) {
 }
 
 function renderConfig() {
-  elements['server-url'].value = state.config.serverUrl;
   elements['microphone-enabled'].checked = state.config.microphoneEnabled;
   const hotkey = displayHotkey(state.config.answerHotkey);
   elements['hotkey-recorder'].textContent = hotkey;
@@ -67,7 +66,7 @@ function updateStartState() {
   if (!state.config?.activated) {
     elements['start-requirement'].textContent = '请先输入激活码并完成激活';
   } else if (!state.connected) {
-    elements['start-requirement'].textContent = '机构服务未连接，请点击上方“测试”';
+    elements['start-requirement'].textContent = '机构服务暂不可用，请稍后重试';
   } else if (!state.masterPackConfigured) {
     elements['start-requirement'].textContent = '机构资料尚未就绪，请联系发布方';
   } else {
@@ -75,17 +74,9 @@ function updateStartState() {
   }
 }
 
-async function saveServerUrl() {
-  const serverUrl = elements['server-url'].value.trim();
-  state.config = await api.updateConfig({ serverUrl });
-  renderConfig();
-}
-
 async function testServer() {
-  elements['test-server'].disabled = true;
   elements['connection-summary'].textContent = '正在连接';
   try {
-    await saveServerUrl();
     const result = await api.testServer();
     state.connected = result.ok;
     state.masterPackConfigured = result.masterPackConfigured;
@@ -99,7 +90,6 @@ async function testServer() {
     elements['header-status'].textContent = '服务不可用';
     showToast(errorMessage(error), 'error');
   } finally {
-    elements['test-server'].disabled = false;
     updateStartState();
   }
 }
@@ -109,7 +99,6 @@ async function activate() {
   if (!code) return showToast('请输入激活码', 'error');
   elements['activate-button'].disabled = true;
   try {
-    await saveServerUrl();
     await api.activate(code);
     state.config = await api.getConfig();
     elements['activation-code'].value = '';
@@ -450,12 +439,10 @@ api.onAnswerError(({ message }) => {
 elements['supplement'].addEventListener('input', () => {
   elements['supplement-count'].textContent = `${elements.supplement.value.length} / 30000`;
 });
-elements['test-server'].addEventListener('click', testServer);
 elements['activate-button'].addEventListener('click', activate);
 elements['activation-code'].addEventListener('keydown', (event) => { if (event.key === 'Enter') activate(); });
 elements['deactivate-button'].addEventListener('click', async () => {
   state.config = await api.deactivate();
-  state.connected = false;
   renderConfig();
 });
 elements['hotkey-recorder'].addEventListener('click', beginHotkeyRecording);

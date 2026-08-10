@@ -8,6 +8,11 @@ $questions = Get-Content -LiteralPath $questionsPath -Raw -Encoding UTF8 | Conve
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$format = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(
+  16000,
+  [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen,
+  [System.Speech.AudioFormat.AudioChannel]::Mono
+)
 try {
   foreach ($question in $questions) {
     $builder = New-Object System.Speech.Synthesis.PromptBuilder
@@ -18,7 +23,7 @@ try {
       $builder.EndVoice()
     }
     $file = Join-Path $outputRoot ($question.id + '.wav')
-    $synth.SetOutputToWaveFile($file)
+    $synth.SetOutputToWaveFile($file, $format)
     $synth.Speak($builder)
     $synth.SetOutputToNull()
   }

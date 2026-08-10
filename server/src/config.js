@@ -27,6 +27,13 @@ function decodeEncryptionKey(raw) {
   return key;
 }
 
+function parseBoolean(raw, fallback = false) {
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  if (raw === true || raw === 'true' || raw === '1') return true;
+  if (raw === false || raw === 'false' || raw === '0') return false;
+  throw new Error(`Invalid boolean value: ${raw}`);
+}
+
 export function loadConfig(overrides = {}) {
   const test = process.env.NODE_ENV === 'test';
   const encryptionRaw = overrides.masterEncryptionKeyRaw ?? required('MASTER_ENCRYPTION_KEY', { allowTestDefault: true });
@@ -38,7 +45,9 @@ export function loadConfig(overrides = {}) {
     masterEncryptionKey: overrides.masterEncryptionKey ?? decodeEncryptionKey(encryptionRaw),
     adminApiKey: overrides.adminApiKey ?? required('ADMIN_API_KEY', { allowTestDefault: true }),
     studentTokenSecret: overrides.studentTokenSecret ?? required('STUDENT_TOKEN_SECRET', { allowTestDefault: true }),
+    studentTokenTtlMs: Number(overrides.studentTokenTtlMs ?? process.env.STUDENT_TOKEN_TTL_MS ?? 30 * 24 * 60 * 60 * 1000),
     activationCodes: overrides.activationCodes ?? parseActivationCodes(process.env.STUDENT_ACTIVATION_CODES ?? (test ? 'test-code:test-student' : '')),
+    trustProxy: parseBoolean(overrides.trustProxy ?? process.env.TRUST_PROXY, false),
     sessionTtlMs: Number(overrides.sessionTtlMs ?? process.env.SESSION_TTL_MS ?? 6 * 60 * 60 * 1000),
     maxSupplementChars: Number(overrides.maxSupplementChars ?? process.env.MAX_SUPPLEMENT_CHARS ?? 30_000),
     sttProvider: overrides.sttProvider ?? process.env.STT_PROVIDER ?? 'seed-asr',

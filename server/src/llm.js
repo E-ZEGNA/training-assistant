@@ -97,18 +97,67 @@ export async function* readSseJson(response) {
 
 function streamError(event, fallback) {
   const error = event?.error ?? event?.response?.error;
-  return new Error(error?.message ?? error?.code ?? fallback);
+  const result = new Error(error?.message ?? error?.code ?? fallback);
+  result.code = error?.code;
+  return result;
+}
+
+function retryableLlmError(error) {
+  if (error?.name === 'AbortError') return false;
+  if ([408, 409, 429, 500, 502, 503, 504].includes(error?.statusCode)) return true;
+  return /overload|try again|temporar|timeout|rate.?limit|capacity|繁忙|稍后重试/i.test(String(error?.message ?? ''));
+}
+
+function retryDelay(attempt, signal) {
+  const delayMs = 500 * 2 ** attempt + Math.floor(Math.random() * 250);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
+}
+
+async function* retryBeforeFirstToken(createStream, signal, maxAttempts = 3) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let yielded = false;
+    try {
+      for await (const token of createStream()) {
+        yielded = true;
+        yield token;
+      }
+      return;
+    } catch (error) {
+      if (yielded || attempt + 1 >= maxAttempts || !retryableLlmError(error)) throw error;
+      await retryDelay(attempt, signal);
+    }
+  }
 }
 
 async function* callCodexConfigApi(config, system, user, signal) {
   const local = await loadLocalCodexCredentials(config.llm);
   if (local.wireApi !== 'responses') throw new Error(`Unsupported Codex provider wire_api: ${local.wireApi}`);
-  const response = await fetch(`${local.baseUrl}/responses`, {
+  yield* callResponsesApi({
+    baseUrl: local.baseUrl,
+    apiKey: local.apiKey,
+    model: config.llm.model || local.model,
+    reasoningEffort: config.llm.reasoningEffort,
+    system,
+    user,
+    signal,
+    providerName: 'Local Codex provider',
+  });
+}
+
+async function* callResponsesApi({ baseUrl, apiKey, model, reasoningEffort, system, user, signal, providerName = 'Responses API' }) {
+  if (!apiKey) throw new Error('LLM_API_KEY is not configured');
+  const response = await fetch(`${baseUrl}/responses`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${local.apiKey}` },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: config.llm.model || local.model,
-      reasoning: { effort: config.llm.reasoningEffort },
+      model,
+      reasoning: { effort: reasoningEffort },
       store: false,
       stream: true,
       input: [
@@ -120,7 +169,9 @@ async function* callCodexConfigApi(config, system, user, signal) {
   });
   if (!response.ok) {
     const requestId = response.headers.get('x-request-id') ?? 'unknown';
-    throw new Error(`Local Codex provider request failed (${response.status}, request ${requestId})`);
+    const error = new Error(`${providerName} request failed (${response.status}, request ${requestId})`);
+    error.statusCode = response.status;
+    throw error;
   }
   for await (const event of readSseJson(response)) {
     if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') yield event.delta;
@@ -143,7 +194,9 @@ async function* callDedicatedApi(config, system, user, signal) {
   });
   if (!response.ok) {
     const requestId = response.headers.get('x-request-id') ?? 'unknown';
-    throw new Error(`LLM request failed (${response.status}, request ${requestId})`);
+    const error = new Error(`LLM request failed (${response.status}, request ${requestId})`);
+    error.statusCode = response.status;
+    throw error;
   }
   for await (const event of readSseJson(response)) {
     if (event?.error) throw streamError(event, 'Chat Completions stream failed');
@@ -161,9 +214,21 @@ export async function generateInterviewAnswer({ config, master, session, transcr
   const evidence = retrieveChunks(master.text, `${currentQuestion}\n${session.supplement}`, 4);
   const { system, user } = buildInterviewPrompt({ config, session, currentQuestion, evidence });
 
-  const stream = config.llm.provider === 'codex-config'
-    ? callCodexConfigApi(config, system, `${user}\n\n只输出候选人要说的答案。`, signal)
-    : callDedicatedApi(config, system, user, signal);
+  let createStream;
+  if (config.llm.provider === 'codex-config') {
+    createStream = () => callCodexConfigApi(config, system, `${user}\n\n只输出候选人要说的答案。`, signal);
+  } else if (config.llm.provider === 'responses-api') {
+    createStream = () => callResponsesApi({
+      ...config.llm,
+      system,
+      user: `${user}\n\n只输出候选人要说的答案。`,
+      signal,
+      providerName: 'Responses API',
+    });
+  } else {
+    createStream = () => callDedicatedApi(config, system, user, signal);
+  }
+  const stream = retryBeforeFirstToken(createStream, signal);
   let answer = '';
   let contentStarted = false;
   let blocked = false;

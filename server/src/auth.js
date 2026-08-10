@@ -15,10 +15,12 @@ function sign(payload, secret) {
   return createHmac('sha256', secret).update(payload).digest('base64url');
 }
 
-export function issueStudentToken({ studentId, deviceId }, secret, ttlMs = 30 * 24 * 60 * 60 * 1000) {
+export function issueStudentToken({ studentId, deviceId, bindingId }, secret, ttlMs = 30 * 24 * 60 * 60 * 1000) {
   const payload = Buffer.from(JSON.stringify({
+    v: 1,
     sub: studentId,
     device: createHash('sha256').update(deviceId).digest('base64url'),
+    binding: bindingId,
     exp: Date.now() + ttlMs,
   })).toString('base64url');
   return `${payload}.${sign(payload, secret)}`;
@@ -30,7 +32,8 @@ export function verifyStudentToken(token, secret) {
   if (!payload || !signature || extra || !sameSecret(signature, sign(payload, secret))) return null;
   try {
     const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (typeof claims.sub !== 'string' || !Number.isFinite(claims.exp) || claims.exp <= Date.now()) return null;
+    if (claims.v !== 1 || typeof claims.sub !== 'string' || typeof claims.binding !== 'string'
+      || !Number.isFinite(claims.exp) || claims.exp <= Date.now()) return null;
     return claims;
   } catch {
     return null;

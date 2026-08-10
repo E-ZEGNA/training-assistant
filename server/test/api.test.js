@@ -6,13 +6,15 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createApplication } from '../src/app.js';
 
-async function fixture() {
+async function fixture(overrides = {}) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'interview-api-'));
   const config = {
     host: '127.0.0.1', port: 0, publicBaseUrl: '', dataDir,
     masterEncryptionKey: randomBytes(32), adminApiKey: 'admin-secret', studentTokenSecret: 'student-secret',
     activationCodes: new Map([['activate-me', 'student-1']]), sessionTtlMs: 60_000, maxSupplementChars: 30_000,
-    sttProvider: 'mock', seedAsr: {}, llm: { provider: 'api', codexConfigPath: '', codexAuthPath: '', baseUrl: 'http://invalid', apiKey: '', model: 'mock', reasoningEffort: 'low' },
+    sttProvider: 'mock', seedAsr: {}, trustProxy: false, studentTokenTtlMs: 60_000,
+    llm: { provider: 'api', codexConfigPath: '', codexAuthPath: '', baseUrl: 'http://invalid', apiKey: '', model: 'mock', reasoningEffort: 'low' },
+    ...overrides,
   };
   const application = createApplication(config);
   await new Promise((resolve) => application.server.listen(0, '127.0.0.1', resolve));
@@ -79,6 +81,54 @@ test('student routes enforce authorization and supplement limits', async () => {
       body: JSON.stringify({ supplement: 'x'.repeat(30_001) }),
     });
     assert.equal(oversized.status, 400);
+  } finally {
+    await application.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('activation binds one code to one device and client IP', async () => {
+  const { application, baseUrl, dataDir } = await fixture({ trustProxy: true });
+  try {
+    const activate = (deviceId, ip) => fetch(`${baseUrl}/v1/student/activate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-real-ip': ip },
+      body: JSON.stringify({ code: 'activate-me', deviceId }),
+    });
+    assert.equal((await activate('device-12345678', '203.0.113.10')).status, 200);
+    assert.equal((await activate('device-87654321', '203.0.113.10')).status, 409);
+    assert.equal((await activate('device-12345678', '203.0.113.11')).status, 409);
+  } finally {
+    await application.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('admin can revoke and reset a binding', async () => {
+  const { application, baseUrl, dataDir } = await fixture();
+  try {
+    const activation = await fetch(`${baseUrl}/v1/student/activate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: 'activate-me', deviceId: 'device-12345678' }),
+    });
+    const { token } = await activation.json();
+    let response = await fetch(`${baseUrl}/v1/admin/student-bindings`, { headers: { 'x-admin-key': 'admin-secret' } });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).bindings[0].studentId, 'student-1');
+    response = await fetch(`${baseUrl}/v1/admin/student-bindings/student-1`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-key': 'admin-secret' }, body: JSON.stringify({ action: 'revoke' }),
+    });
+    assert.equal(response.status, 204);
+    response = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-device-id': 'device-12345678' }, body: JSON.stringify({ supplement: '' }),
+    });
+    assert.equal(response.status, 401);
+    response = await fetch(`${baseUrl}/v1/admin/student-bindings/student-1`, { method: 'DELETE', headers: { 'x-admin-key': 'admin-secret' } });
+    assert.equal(response.status, 204);
+    response = await fetch(`${baseUrl}/v1/student/activate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: 'activate-me', deviceId: 'device-87654321' }),
+    });
+    assert.equal(response.status, 200);
   } finally {
     await application.close();
     await rm(dataDir, { recursive: true, force: true });

@@ -83,6 +83,10 @@ async function triggerAnswer(source) {
 
 function friendlyError(error) {
   const mapping = {
+    invalid_activation: '激活码无效，请检查后重新输入。',
+    activation_already_bound: '该激活码已绑定其他设备或网络，请联系发布方重置。',
+    activation_revoked: '该激活码已停用，请联系发布方。',
+    too_many_attempts: '激活尝试过于频繁，请稍后再试。',
     no_transcript_yet: '还没有识别到面试官的问题，请等转写出现后再试。',
     answer_rate_limited: '请求过于频繁，请稍后再试。',
     answer_generation_failed: '模型生成失败，请稍后重试。',
@@ -116,9 +120,13 @@ function registerIpc() {
     return { ok: health.ok, masterPackConfigured: health.masterPackConfigured };
   });
   ipcMain.handle('student:activate', async (_event, code) => {
-    const result = await serviceClient.activate(String(code ?? '').trim(), configStore.value.deviceId);
-    configStore.setActivationToken(result.token);
-    return { activated: true, studentId: result.studentId };
+    try {
+      const result = await serviceClient.activate(String(code ?? '').trim(), configStore.value.deviceId);
+      configStore.setActivationToken(result.token);
+      return { activated: true, studentId: result.studentId };
+    } catch (error) {
+      throw new Error(friendlyError(error));
+    }
   });
   ipcMain.handle('student:deactivate', async () => {
     await serviceClient.stopSession();

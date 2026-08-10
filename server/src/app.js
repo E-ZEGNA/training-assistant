@@ -1,6 +1,8 @@
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { bearerToken, issueStudentToken, requireAdmin, verifyStudentDevice, verifyStudentToken } from './auth.js';
+import { StudentBindingStore } from './binding-store.js';
+import { getClientIp } from './client-ip.js';
 import { MasterPackStore } from './crypto-store.js';
 import { generateInterviewAnswer } from './llm.js';
 import { json, noContent, RateLimiter, readJson, route } from './http-utils.js';
@@ -10,9 +12,17 @@ function log(event, details = {}) {
   process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), event, ...details })}\n`);
 }
 
-function authStudent(req, config) {
+function authStudent(req, config, bindingStore) {
   const claims = verifyStudentToken(bearerToken(req), config.studentTokenSecret);
-  return verifyStudentDevice(claims, req.headers['x-device-id']) ? claims : null;
+  const deviceId = req.headers['x-device-id'];
+  if (!verifyStudentDevice(claims, deviceId)) return null;
+  const authorized = bindingStore.verify({
+    studentId: claims.sub,
+    bindingId: claims.binding,
+    deviceId,
+    clientIp: getClientIp(req, config.trustProxy),
+  });
+  return authorized ? claims : null;
 }
 
 function startSse(res) {
@@ -32,8 +42,10 @@ function sendSse(res, event, data) {
 
 export function createApplication(config) {
   const masterStore = new MasterPackStore(config.dataDir, config.masterEncryptionKey);
+  const bindingStore = new StudentBindingStore(config.dataDir, config.studentTokenSecret);
   const sessionStore = new SessionStore(config, masterStore);
   const activationLimiter = new RateLimiter({ limit: 8, windowMs: 15 * 60_000 });
+  const sessionLimiter = new RateLimiter({ limit: 10, windowMs: 60_000 });
   const answerLimiter = new RateLimiter({ limit: 30, windowMs: 60_000 });
 
   const server = http.createServer(async (req, res) => {
@@ -44,7 +56,7 @@ export function createApplication(config) {
     try {
       if (req.method === 'GET' && pathname === '/health') {
         const status = await masterStore.status();
-        return json(res, 200, { ok: true, masterPackConfigured: status.configured, sttProvider: config.sttProvider });
+        return json(res, 200, { ok: true, masterPackConfigured: status.configured });
       }
 
       if (req.method === 'GET' && pathname === '/v1/admin/master-pack/status') {
@@ -61,21 +73,53 @@ export function createApplication(config) {
         return json(res, 200, result);
       }
 
+      if (req.method === 'GET' && pathname === '/v1/admin/student-bindings') {
+        if (!requireAdmin(req, config)) return json(res, 401, { error: 'unauthorized' });
+        return json(res, 200, { bindings: bindingStore.list() });
+      }
+
+      const bindingParams = route(pathname, '/v1/admin/student-bindings/:studentId');
+      if (bindingParams && req.method === 'POST') {
+        if (!requireAdmin(req, config)) return json(res, 401, { error: 'unauthorized' });
+        const body = await readJson(req, 1024);
+        if (body.action !== 'revoke') return json(res, 400, { error: 'invalid_binding_action' });
+        if (!bindingStore.revoke(bindingParams.studentId)) return json(res, 404, { error: 'binding_not_found' });
+        log('student_binding_revoked', { studentId: bindingParams.studentId });
+        return noContent(res);
+      }
+
+      if (bindingParams && req.method === 'DELETE') {
+        if (!requireAdmin(req, config)) return json(res, 401, { error: 'unauthorized' });
+        if (!bindingStore.reset(bindingParams.studentId)) return json(res, 404, { error: 'binding_not_found' });
+        log('student_binding_reset', { studentId: bindingParams.studentId });
+        return noContent(res);
+      }
+
       if (req.method === 'POST' && pathname === '/v1/student/activate') {
-        const remote = req.socket.remoteAddress ?? 'unknown';
-        if (!activationLimiter.take(remote)) return json(res, 429, { error: 'too_many_attempts' });
+        const clientIp = getClientIp(req, config.trustProxy);
+        if (!activationLimiter.take(clientIp)) return json(res, 429, { error: 'too_many_attempts' });
         const body = await readJson(req, 4096);
         const studentId = config.activationCodes.get(String(body.code ?? ''));
         const deviceId = String(body.deviceId ?? '');
         if (!studentId || deviceId.length < 8 || deviceId.length > 256) return json(res, 401, { error: 'invalid_activation' });
-        const token = issueStudentToken({ studentId, deviceId }, config.studentTokenSecret);
-        log('student_activated', { studentId });
+        const activated = bindingStore.activate(studentId, deviceId, clientIp);
+        if (!activated.ok) {
+          const status = activated.reason === 'revoked' ? 403 : 409;
+          return json(res, status, { error: activated.reason === 'revoked' ? 'activation_revoked' : 'activation_already_bound' });
+        }
+        const token = issueStudentToken(
+          { studentId, deviceId, bindingId: activated.binding.bindingId },
+          config.studentTokenSecret,
+          config.studentTokenTtlMs,
+        );
+        log('student_activated', { studentId, bindingId: activated.binding.bindingId });
         return json(res, 200, { token, studentId });
       }
 
       if (req.method === 'POST' && pathname === '/v1/sessions') {
-        const claims = authStudent(req, config);
+        const claims = authStudent(req, config, bindingStore);
         if (!claims) return json(res, 401, { error: 'unauthorized' });
+        if (!sessionLimiter.take(claims.sub)) return json(res, 429, { error: 'session_rate_limited' });
         const body = await readJson(req, config.maxSupplementChars + 4096);
         const session = await sessionStore.create(claims.sub, String(body.supplement ?? ''));
         log('session_started', { sessionId: session.id, studentId: claims.sub, supplementCharacters: session.supplement.length });
@@ -84,7 +128,7 @@ export function createApplication(config) {
 
       const answerParams = route(pathname, '/v1/sessions/:id/answer');
       if (req.method === 'POST' && answerParams) {
-        const claims = authStudent(req, config);
+        const claims = authStudent(req, config, bindingStore);
         if (!claims) return json(res, 401, { error: 'unauthorized' });
         if (!answerLimiter.take(claims.sub)) return json(res, 429, { error: 'answer_rate_limited' });
         const session = sessionStore.get(answerParams.id, claims.sub);
@@ -92,7 +136,9 @@ export function createApplication(config) {
         await readJson(req, 2048);
         const transcriptContext = sessionStore.context(session);
         if (!transcriptContext.text.trim()) return json(res, 409, { error: 'no_transcript_yet' });
+        if (session.answerInProgress) return json(res, 409, { error: 'answer_in_progress' });
         const master = await masterStore.get();
+        session.answerInProgress = true;
         const controller = new AbortController();
         res.once('close', () => {
           if (!res.writableEnded) controller.abort();
@@ -117,6 +163,7 @@ export function createApplication(config) {
             sendSse(res, 'error', { error: 'answer_generation_failed' });
           }
         } finally {
+          session.answerInProgress = false;
           if (!res.writableEnded) res.end();
         }
         return;
@@ -124,7 +171,7 @@ export function createApplication(config) {
 
       const sessionParams = route(pathname, '/v1/sessions/:id');
       if (req.method === 'DELETE' && sessionParams) {
-        const claims = authStudent(req, config);
+        const claims = authStudent(req, config, bindingStore);
         if (!claims) return json(res, 401, { error: 'unauthorized' });
         if (!sessionStore.end(sessionParams.id, claims.sub)) return json(res, 404, { error: 'session_not_found' });
         log('session_ended', { sessionId: sessionParams.id, studentId: claims.sub });
@@ -145,7 +192,7 @@ export function createApplication(config) {
   server.on('upgrade', (req, socket, head) => {
     const requestUrl = new URL(req.url, 'http://localhost');
     const params = route(requestUrl.pathname, '/v1/sessions/:id/audio');
-    const claims = authStudent(req, config);
+    const claims = authStudent(req, config, bindingStore);
     const channel = requestUrl.searchParams.get('channel');
     const session = params && claims ? sessionStore.get(params.id, claims.sub) : null;
     if (!session || (channel !== 'system' && channel !== 'mic')) {
@@ -154,6 +201,8 @@ export function createApplication(config) {
       return;
     }
     websocketServer.handleUpgrade(req, socket, head, (ws) => {
+      session.clientSockets.get(channel)?.close(1000, 'channel replaced');
+      session.clientSockets.set(channel, ws);
       const stream = sessionStore.createAsr(session, channel);
       stream.on('status', (status) => ws.readyState === ws.OPEN && ws.send(JSON.stringify({ type: 'status', ...status })));
       stream.on('transcript', (event) => {
@@ -180,6 +229,7 @@ export function createApplication(config) {
       ws.on('close', () => {
         stream.stop();
         if (session.audioStreams.get(channel) === stream) session.audioStreams.delete(channel);
+        if (session.clientSockets.get(channel) === ws) session.clientSockets.delete(channel);
       });
       stream.start();
     });
@@ -188,6 +238,7 @@ export function createApplication(config) {
   return {
     server,
     masterStore,
+    bindingStore,
     sessionStore,
     async close() {
       sessionStore.close();
