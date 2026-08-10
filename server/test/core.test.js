@@ -6,9 +6,10 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { MasterPackStore } from '../src/crypto-store.js';
 import { issueStudentToken, verifyStudentDevice, verifyStudentToken } from '../src/auth.js';
-import { buildHotwords, hasVerbatimLeak, looksLikeExfiltration, retrieveChunks } from '../src/retrieval.js';
+import { buildHotwords, createVerbatimLeakGuard, hasVerbatimLeak, looksLikeExfiltration, retrieveChunks } from '../src/retrieval.js';
 import { buildStartRequest, decodeFrame, encodeFrame, MockAsrStream, SeedAsrStream } from '../src/seed-asr.js';
-import { readSseJson } from '../src/llm.js';
+import { buildInterviewPrompt, generateInterviewAnswer, readSseJson } from '../src/llm.js';
+import { SessionStore } from '../src/sessions.js';
 
 test('master pack is encrypted at rest and round-trips', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'interview-master-'));
@@ -53,6 +54,78 @@ test('retrieval selects technical evidence and leak guards detect unsafe output'
   assert.ok(bounded.reduce((sum, item) => sum + item.word.length, 0) <= 40);
 });
 
+test('incremental leak guard streams safe text and blocks the 100th copied character', () => {
+  const master = '机密主线程内容'.repeat(30);
+  const copied = master.slice(0, 120);
+  const guard = createVerbatimLeakGuard(master);
+  const first = guard.push(copied.slice(0, 99));
+  const second = guard.push(copied.slice(99));
+  assert.deepEqual(first, { safeText: copied.slice(0, 99), leaked: false });
+  assert.equal(second.safeText, '');
+  assert.equal(second.leaked, true);
+
+  const whitespaceMaster = `${'A'.repeat(50)} ${'B'.repeat(60)}`;
+  const whitespaceGuard = createVerbatimLeakGuard(whitespaceMaster);
+  assert.equal(whitespaceGuard.push(`${'A'.repeat(50)}   `).leaked, false);
+  const whitespaceResult = whitespaceGuard.push('B'.repeat(60));
+  assert.equal(whitespaceResult.safeText, 'B'.repeat(48));
+  assert.equal(whitespaceResult.leaked, true);
+});
+
+test('short model output is forwarded before the upstream stream closes', async (context) => {
+  let upstreamClosed = false;
+  const encoder = new TextEncoder();
+  context.mock.method(globalThis, 'fetch', async () => new Response(new ReadableStream({
+    async start(controller) {
+      for (const content of ['第一段', '第二段', '第三段']) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      upstreamClosed = true;
+      controller.close();
+    },
+  }), { status: 200 }));
+
+  const tokens = [];
+  const answer = await generateInterviewAnswer({
+    config: { llm: { provider: 'api', apiKey: 'test', baseUrl: 'http://test', model: 'test', reasoningEffort: 'low', contextWindowTokens: 1_000_000 } },
+    master: { text: '与回答无关的主线程资料'.repeat(20) },
+    session: { supplement: '', answerHistory: [] },
+    transcriptContext: '测试问题',
+    onToken: (token) => tokens.push({ token, upstreamClosed }),
+  });
+  assert.equal(answer, '第一段第二段第三段');
+  assert.deepEqual(tokens.map(({ token }) => token), ['第一段', '第二段', '第三段']);
+  assert.equal(tokens.every(({ upstreamClosed: closed }) => closed === false), true);
+});
+
+test('verbatim output is replaced after the copied prefix is reclaimed', async (context) => {
+  const master = '不可逐字输出的机构内部资料'.repeat(20);
+  const copied = master.slice(0, 130);
+  const encoder = new TextEncoder();
+  context.mock.method(globalThis, 'fetch', async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: copied } }] })}\n\n`));
+      controller.close();
+    },
+  }), { status: 200 }));
+
+  const tokens = [];
+  const replacements = [];
+  const answer = await generateInterviewAnswer({
+    config: { llm: { provider: 'api', apiKey: 'test', baseUrl: 'http://test', model: 'test', reasoningEffort: 'low', contextWindowTokens: 1_000_000 } },
+    master: { text: master },
+    session: { supplement: '', answerHistory: [] },
+    transcriptContext: '介绍项目',
+    onToken: (token) => tokens.push(token),
+    onReplace: (text) => replacements.push(text),
+  });
+  assert.equal(tokens.join('').length, 99);
+  assert.equal(replacements.length, 1);
+  assert.equal(answer, replacements[0]);
+  assert.match(answer, /内部提示或资料原文/);
+});
+
 test('Responses SSE parser handles split CRLF frames and done markers', async () => {
   const chunks = [
     'event: response.output_text.delta\r\ndata: {"type":"response.output_',
@@ -93,7 +166,7 @@ test('mock ASR confirms that local PCM audio reached the server', () => {
   assert.equal(transcripts.length, 1);
 });
 
-test('Seed-ASR final state follows the latest utterance, not an earlier finalized segment', () => {
+test('Seed-ASR preserves an earlier final utterance when a later one is partial', () => {
   const stream = new SeedAsrStream({ endpoint: '', apiKey: '', resourceId: '', uid: 'test', hotwords: [] });
   const transcripts = [];
   stream.on('transcript', (event) => transcripts.push(event));
@@ -110,10 +183,153 @@ test('Seed-ASR final state follows the latest utterance, not an earlier finalize
     { text: '第一句', definite: true },
     { text: '第二句', definite: true },
   ]));
-  assert.equal(transcripts[0].text, '第二');
-  assert.equal(transcripts[0].final, false);
-  assert.equal(transcripts[1].text, '第二句');
-  assert.equal(transcripts[1].final, true);
+  assert.deepEqual(transcripts.map(({ text, final }) => ({ text, final })), [
+    { text: '第一句', final: true },
+    { text: '第二', final: false },
+    { text: '第二句', final: true },
+  ]);
+});
+
+test('Seed-ASR finalizes a missing partial before a new utterance starts', () => {
+  const stream = new SeedAsrStream({ endpoint: '', apiKey: '', resourceId: '', uid: 'test', hotwords: [] });
+  const transcripts = [];
+  stream.on('transcript', (event) => transcripts.push(event));
+  const frame = (utterances) => encodeFrame({
+    type: 0x9,
+    serialization: 1,
+    payload: Buffer.from(JSON.stringify({ result: { utterances } })),
+  });
+  stream.handleMessage(frame([{ text: '上一句还在说', start_time: 100, definite: false }]));
+  stream.handleMessage(frame([{ text: '下一句开始', start_time: 200, definite: false }]));
+  assert.deepEqual(transcripts.map(({ text, final }) => ({ text, final })), [
+    { text: '上一句还在说', final: false },
+    { text: '上一句还在说', final: true },
+    { text: '下一句开始', final: false },
+  ]);
+});
+
+test('SessionStore keeps simultaneous partials until the answer snapshot revision', async () => {
+  const store = new SessionStore(
+    { maxSupplementChars: 30_000, sessionTtlMs: 60_000, sttProvider: 'mock', seedAsr: {} },
+    { get: async () => ({ text: '演示主线程资料' }) },
+  );
+  try {
+    const session = await store.create('student-1', '');
+    store.addTranscript(session, 'system', { utteranceId: 'one', text: '上一句还在说', final: false });
+    store.addTranscript(session, 'system', { utteranceId: 'two', text: '下一句已经开始', final: false });
+    store.addTranscript(session, 'mic', { utteranceId: 'one', text: '麦克风同序号内容', final: false });
+    const context = store.context(session);
+    assert.match(context.text, /上一句还在说/);
+    assert.match(context.text, /下一句已经开始/);
+    assert.match(context.text, /麦克风同序号内容/);
+    assert.ok(context.revision > 0);
+    store.markAnswered(session, context.revision);
+    assert.equal(store.context(session).text, '');
+  } finally {
+    store.close();
+  }
+});
+
+test('SessionStore does not mark text that changed while an answer was generating', async () => {
+  const store = new SessionStore(
+    { maxSupplementChars: 30_000, sessionTtlMs: 60_000, sttProvider: 'mock', seedAsr: {} },
+    { get: async () => ({ text: '演示主线程资料' }) },
+  );
+  try {
+    const session = await store.create('student-1', '');
+    store.addTranscript(session, 'system', { utteranceId: 'one', text: '问题还没说完', final: false });
+    const snapshot = store.context(session);
+    store.addTranscript(session, 'system', { utteranceId: 'one', text: '问题还没说完，补充了关键条件', final: true });
+    store.markAnswered(session, snapshot.revision);
+    assert.match(store.context(session).text, /补充了关键条件/);
+  } finally {
+    store.close();
+  }
+});
+
+test('SessionStore keeps full transcript history until the answer snapshot revision', async () => {
+  const store = new SessionStore(
+    { maxSupplementChars: 30_000, sessionTtlMs: 60_000, sttProvider: 'mock', seedAsr: {} },
+    { get: async () => ({ text: '演示主线程资料' }) },
+  );
+  try {
+    const session = await store.create('student-1', '');
+    for (let index = 0; index < 700; index += 1) {
+      store.addTranscript(session, 'system', { utteranceId: `u-${index}`, text: `历史问题 ${index} ${'x'.repeat(30)}`, final: true });
+    }
+    const context = store.context(session);
+    assert.ok(context.text.length > 14_000);
+    assert.match(context.text, /历史问题 0/);
+    store.markAnswered(session, context.revision);
+    assert.equal(store.context(session).text, '');
+  } finally {
+    store.close();
+  }
+});
+
+test('SessionStore keeps transcription that arrives after the answer click', async () => {
+  const store = new SessionStore(
+    { maxSupplementChars: 30_000, sessionTtlMs: 60_000, sttProvider: 'mock', seedAsr: {} },
+    { get: async () => ({ text: '演示主线程资料' }) },
+  );
+  try {
+    const session = await store.create('student-1', '');
+    store.addTranscript(session, 'system', { utteranceId: 'before-click', text: '点击前的问题', final: true });
+    const snapshot = store.context(session);
+    store.addTranscript(session, 'system', { utteranceId: 'after-click', text: '点击后新说的话', final: true });
+    store.markAnswered(session, snapshot.revision);
+    const remaining = store.context(session).text;
+    assert.doesNotMatch(remaining, /点击前的问题/);
+    assert.match(remaining, /点击后新说的话/);
+  } finally {
+    store.close();
+  }
+});
+
+test('LLM prompt drops only the oldest history when the dynamic budget is reached', () => {
+  const history = Array.from({ length: 6 }, (_, index) => ({
+    question: `旧问题 ${index} ${'q'.repeat(500)}`,
+    answer: `旧回答 ${index} ${'a'.repeat(500)}`,
+  }));
+  const currentQuestion = '当前必须保留的问题：请解释本次项目的故障恢复方案。';
+  const prompt = buildInterviewPrompt({
+    config: { llm: { contextWindowTokens: 2_500 } },
+    session: { supplement: '', answerHistory: history },
+    currentQuestion,
+    evidence: ['Kubernetes 调度证据'],
+  });
+  assert.ok(prompt.historyDropped > 0);
+  assert.match(prompt.user, /当前必须保留的问题/);
+  assert.doesNotMatch(prompt.user, /旧问题 0/);
+  assert.match(prompt.user, /旧问题 5/);
+  assert.match(prompt.user, /<历史回答>/);
+});
+
+test('LLM prompt rejects an oversized current question instead of truncating it', () => {
+  assert.throws(() => buildInterviewPrompt({
+    config: { llm: { contextWindowTokens: 1_000 } },
+    session: { supplement: '', answerHistory: [] },
+    currentQuestion: '当前问题'.repeat(10_000),
+    evidence: [],
+  }), /current question was not truncated/);
+});
+
+test('Seed-ASR ignores a delayed partial after the utterance was finalized', () => {
+  const stream = new SeedAsrStream({ endpoint: '', apiKey: '', resourceId: '', uid: 'test', hotwords: [] });
+  const transcripts = [];
+  stream.on('transcript', (event) => transcripts.push({ text: event.text, final: event.final }));
+  const frame = (utterances) => encodeFrame({
+    type: 0x9,
+    serialization: 1,
+    payload: Buffer.from(JSON.stringify({ result: { utterances } })),
+  });
+  stream.handleMessage(frame([{ text: '稳定句子', start_time: 100, definite: false }]));
+  stream.handleMessage(frame([{ text: '稳定句子', start_time: 100, definite: true }]));
+  stream.handleMessage(frame([{ text: '旧的延迟 partial', start_time: 100, definite: false }]));
+  assert.deepEqual(transcripts, [
+    { text: '稳定句子', final: false },
+    { text: '稳定句子', final: true },
+  ]);
 });
 
 test('Seed-ASR emits a final event when text is unchanged but definite state changes', () => {

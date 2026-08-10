@@ -84,3 +84,32 @@ test('student routes enforce authorization and supplement limits', async () => {
     await rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test('failed answer generation does not advance the answered transcript boundary', async () => {
+  const { application, baseUrl, dataDir } = await fixture();
+  try {
+    await application.masterStore.put({ text: '主线程资料，用于回答失败边界测试。'.repeat(4), version: 'v1' });
+    const activation = await fetch(`${baseUrl}/v1/student/activate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: 'activate-me', deviceId: 'device-12345678' }),
+    });
+    const { token } = await activation.json();
+    const headers = { authorization: `Bearer ${token}`, 'x-device-id': 'device-12345678', 'content-type': 'application/json' };
+    const sessionResponse = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers, body: JSON.stringify({ supplement: '' }),
+    });
+    const sessionInfo = await sessionResponse.json();
+    const session = application.sessionStore.get(sessionInfo.id, 'student-1');
+    application.sessionStore.addTranscript(session, 'system', { utteranceId: 'question-1', text: '请介绍项目', final: true });
+
+    const answerResponse = await fetch(`${baseUrl}/v1/sessions/${sessionInfo.id}/answer`, {
+      method: 'POST', headers, body: '{}',
+    });
+    assert.equal(answerResponse.status, 200);
+    assert.match(await answerResponse.text(), /answer_generation_failed/);
+    assert.match(application.sessionStore.context(session).text, /请介绍项目/);
+  } finally {
+    await application.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});

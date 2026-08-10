@@ -91,7 +91,7 @@ export function createApplication(config) {
         if (!session) return json(res, 404, { error: 'session_not_found' });
         await readJson(req, 2048);
         const transcriptContext = sessionStore.context(session);
-        if (!transcriptContext.trim()) return json(res, 409, { error: 'no_transcript_yet' });
+        if (!transcriptContext.text.trim()) return json(res, 409, { error: 'no_transcript_yet' });
         const master = await masterStore.get();
         const controller = new AbortController();
         res.once('close', () => {
@@ -103,11 +103,12 @@ export function createApplication(config) {
             config,
             master,
             session,
-            transcriptContext,
+            transcriptContext: transcriptContext.text,
             signal: controller.signal,
             onToken: (token) => sendSse(res, 'token', { token }),
             onReplace: (text) => sendSse(res, 'replace', { text }),
           });
+          sessionStore.markAnswered(session, transcriptContext.revision);
           log('answer_generated', { sessionId: session.id, studentId: claims.sub, answerCharacters: answer.length });
           sendSse(res, 'done', { ok: true });
         } catch (error) {
@@ -157,7 +158,14 @@ export function createApplication(config) {
       stream.on('status', (status) => ws.readyState === ws.OPEN && ws.send(JSON.stringify({ type: 'status', ...status })));
       stream.on('transcript', (event) => {
         sessionStore.addTranscript(session, channel, event);
-        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'transcript', channel, text: event.text, final: event.final }));
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({
+          type: 'transcript',
+          channel,
+          text: event.text,
+          final: event.final,
+          utteranceId: event.utteranceId,
+          startTime: event.startTime,
+        }));
       });
       stream.on('error', (error) => {
         log('stt_error', { sessionId: session.id, channel, error: error.message });

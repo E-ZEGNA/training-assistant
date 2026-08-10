@@ -80,9 +80,8 @@ export class SeedAsrStream extends EventEmitter {
     this.ws = null;
     this.queue = [];
     this.closed = false;
-    this.lastText = '';
-    this.lastFinal = false;
-    this.lastUtteranceStart = null;
+    this.streamId = randomUUID();
+    this.utteranceStates = new Map();
   }
 
   start() {
@@ -134,15 +133,76 @@ export class SeedAsrStream extends EventEmitter {
       if (frame.type !== MESSAGE.FULL_SERVER || !frame.data?.result) return;
       const result = frame.data.result;
       const utterances = Array.isArray(result.utterances) ? result.utterances : [];
-      const latestUtterance = utterances.at(-1);
-      const text = String(latestUtterance?.text ?? result.text ?? '').trim();
-      const final = latestUtterance?.definite === true;
-      const utteranceStart = Number.isFinite(latestUtterance?.start_time) ? latestUtterance.start_time : null;
-      if (text && (text !== this.lastText || final !== this.lastFinal || utteranceStart !== this.lastUtteranceStart)) {
-        this.lastText = text;
-        this.lastFinal = final;
-        this.lastUtteranceStart = utteranceStart;
-        this.emit('transcript', { text, final, utterances: latestUtterance ? [latestUtterance] : [] });
+      const candidates = utterances.length
+        ? utterances.map((utterance, index) => {
+          const startTime = Number.isFinite(utterance?.start_time) ? utterance.start_time : null;
+          const identity = startTime === null ? `index:${index}` : `start:${startTime}`;
+          return {
+            identity,
+            startTime,
+            text: String(utterance?.text ?? '').trim(),
+            final: utterance?.definite === true,
+            utterance,
+          };
+        })
+        : [{
+          identity: 'result',
+          startTime: null,
+          text: String(result.text ?? '').trim(),
+          final: false,
+          utterance: null,
+        }];
+      const currentIdentities = new Set(candidates.map(({ identity }) => identity));
+      const events = [];
+
+      for (const [identity, previous] of this.utteranceStates) {
+        if (!previous.final && !currentIdentities.has(identity) && previous.text) {
+          events.push({
+            identity,
+            startTime: previous.startTime,
+            text: previous.text,
+            final: true,
+            utterances: previous.utterance ? [previous.utterance] : [],
+          });
+          this.utteranceStates.set(identity, { ...previous, final: true });
+        }
+      }
+
+      for (const candidate of candidates) {
+        if (!candidate.text) continue;
+        const previous = this.utteranceStates.get(candidate.identity);
+        if (previous?.final && !candidate.final) continue;
+        if (previous?.text === candidate.text && previous.final === candidate.final) continue;
+        this.utteranceStates.set(candidate.identity, candidate);
+        events.push({
+          identity: candidate.identity,
+          startTime: candidate.startTime,
+          text: candidate.text,
+          final: candidate.final,
+          utterances: [candidate.utterance].filter(Boolean),
+        });
+      }
+
+      events.sort((left, right) => {
+        const leftStart = left.startTime ?? Number.MAX_SAFE_INTEGER;
+        const rightStart = right.startTime ?? Number.MAX_SAFE_INTEGER;
+        return leftStart - rightStart;
+      });
+      for (const event of events) {
+        this.emit('transcript', {
+          text: event.text,
+          final: event.final,
+          utterances: event.utterances,
+          utteranceId: `${this.streamId}:${event.identity}`,
+          startTime: event.startTime,
+        });
+      }
+
+      if (this.utteranceStates.size > 256) {
+        for (const [identity, state] of this.utteranceStates) {
+          if (state.final) this.utteranceStates.delete(identity);
+          if (this.utteranceStates.size <= 192) break;
+        }
       }
     } catch (error) {
       this.emit('error', error);
