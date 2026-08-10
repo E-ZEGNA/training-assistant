@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -23,6 +23,25 @@ test('master pack is encrypted at rest and round-trips', async () => {
     assert.equal(disk.includes(secret), false);
     assert.deepEqual(await store.get(), { text: secret, version: 'v1', updatedAt: (await store.get()).updatedAt });
     assert.deepEqual(await store.status(), { configured: true, version: 'v1', updatedAt: (await store.get()).updatedAt, characters: secret.length });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('student master packs are isolated and encrypted independently', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'interview-masters-'));
+  try {
+    const store = new MasterPackStore(directory, randomBytes(32));
+    const first = '学员 A 的主线程包，包含 Kubernetes 和 GPU 项目事实。';
+    const second = '学员 B 的主线程包，包含 RAG 和 Agent 项目事实。';
+    await store.put({ studentId: 'student-a', text: first, version: 'a-v1' });
+    await store.put({ studentId: 'student-b', text: second, version: 'b-v1' });
+    const files = await readdir(directory);
+    assert.equal(files.length, 2);
+    for (const file of files) assert.doesNotMatch(await readFile(path.join(directory, file), 'utf8'), /学员 [AB] 的主线程包/);
+    assert.equal((await store.get('student-a')).text, first);
+    assert.equal((await store.get('student-b')).text, second);
+    await assert.rejects(() => store.get('student-c'), { code: 'ENOENT' });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -22,7 +22,18 @@ export class SessionStore {
       error.statusCode = 400;
       throw error;
     }
-    const master = await this.masterStore.get();
+    let master;
+    try {
+      master = await this.masterStore.get(studentId);
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        const missing = new Error('Master pack is not configured for this student');
+        missing.statusCode = 503;
+        missing.publicCode = 'master_pack_not_configured';
+        throw missing;
+      }
+      throw error;
+    }
     for (const existing of [...this.sessions.values()]) {
       if (existing.studentId === studentId) this.end(existing.id, studentId);
     }
