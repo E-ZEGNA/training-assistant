@@ -15,7 +15,7 @@ async function fixture() {
     persistenceQueueLimit: 1000, requireStudentProvider: false,
     sttProvider: 'mock', seedAsr: {}, llm: { provider: 'api', codexConfigPath: '', codexAuthPath: '', baseUrl: 'http://invalid', apiKey: '', model: 'mock', reasoningEffort: 'low' },
     xiaomuai: {
-      baseUrl: 'https://xiaomuai.cn/v1', llmModel: 'gpt-5.6-terra', sttModel: 'mimo-v2.5-asr', timeoutMs: 100,
+      baseUrl: 'https://xiaomuai.cn/v1', llmModel: 'gpt-5.6-terra', sttModel: 'seed-asr', timeoutMs: 100,
       fetchImpl: async () => new Response(JSON.stringify({ data: [{ id: 'gpt-5.6-terra' }] }), { status: 200 }),
     },
   };
@@ -137,7 +137,7 @@ test('student provider configuration is isolated and never returns the API key',
     const second = await activate(baseUrl, 'activate-other', 'device-87654321');
     let response = await fetch(`${baseUrl}/v1/student/provider`, {
       method: 'PUT', headers: first.headers,
-      body: JSON.stringify({ apiKey, llmModel: 'gpt-5.6-terra', sttModel: 'mimo-v2.5-asr' }),
+      body: JSON.stringify({ apiKey, llmModel: 'gpt-5.6-terra', sttModel: 'some-stt-model-ignored' }),
     });
     assert.equal(response.status, 200);
     const saved = await response.json();
@@ -145,7 +145,7 @@ test('student provider configuration is isolated and never returns the API key',
       configured: true,
       baseUrl: 'https://xiaomuai.cn/v1',
       llmModel: 'gpt-5.6-terra',
-      sttModel: 'mimo-v2.5-asr',
+      sttModel: 'seed-asr',
       llmAvailable: true,
       sttAvailable: false,
     });

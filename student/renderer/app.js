@@ -88,7 +88,7 @@ function renderProvider() {
   const provider = state.provider ?? { configured: false };
   if (provider.configured) {
     elements['provider-llm-model'].value = provider.llmModel;
-    elements['provider-stt-model'].value = provider.sttModel;
+    elements['provider-stt-model'].value = 'seed-asr';
     elements['provider-status'].textContent = provider.llmAvailable ? '模型服务可用' : '所选大模型不可用';
   } else {
     elements['provider-status'].textContent = '尚未配置';

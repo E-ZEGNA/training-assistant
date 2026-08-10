@@ -4,6 +4,7 @@ import { SeedAsrStream } from './seed-asr.js';
 
 // Fixed student-provider endpoint; it is never accepted from student input.
 export const XIAOMUAI_BASE_URL = 'https://xiaomuai.cn/v1';
+export const STUDENT_STT_MODEL = 'seed-asr';
 
 function providerError(status, body) {
   // Do not reflect provider response text: upstream gateways occasionally
@@ -214,6 +215,7 @@ export class FallbackAsrStream extends EventEmitter {
 
 export function createStudentAsrStream({ provider, seedConfig, uid, hotwords }) {
   const createSeed = () => new SeedAsrStream({ ...seedConfig, uid, hotwords });
+  if (provider?.sttModel === STUDENT_STT_MODEL) return createSeed();
   if (!provider?.configured || !provider.sttAvailable) return createSeed();
   const primary = new XiaomuaiAsrStream({
     baseUrl: provider.baseUrl,

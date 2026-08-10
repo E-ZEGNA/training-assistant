@@ -103,7 +103,7 @@ export function createApplication(config) {
           const body = await readJson(req, 8192);
           const apiKey = String(body.apiKey ?? '').trim();
           const llmModel = String(body.llmModel ?? config.xiaomuai.llmModel).trim();
-          const sttModel = String(body.sttModel ?? config.xiaomuai.sttModel).trim();
+          const sttModel = config.xiaomuai.sttModel;
           if (apiKey.length < 8 || apiKey.length > 1024 || !/^[A-Za-z0-9._:+\-/]+$/.test(llmModel) || !/^[A-Za-z0-9._:+\-/]+$/.test(sttModel)) {
             return json(res, 400, { error: 'invalid_provider_configuration' });
           }

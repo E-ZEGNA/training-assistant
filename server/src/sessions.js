@@ -27,7 +27,12 @@ export class SessionStore {
       throw error;
     }
     const master = await this.masterStore.get();
-    const provider = this.historyStore ? await this.historyStore.getProvider(studentId) : null;
+    const storedProvider = this.historyStore ? await this.historyStore.getProvider(studentId) : null;
+    const provider = storedProvider ? {
+      ...storedProvider,
+      sttModel: this.config.xiaomuai.sttModel,
+      sttAvailable: false,
+    } : null;
     if (this.config.requireStudentProvider && !provider) {
       const error = new Error('Student provider is not configured');
       error.statusCode = 412;

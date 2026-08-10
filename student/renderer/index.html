@@ -52,7 +52,7 @@
             <label class="field full-width"><span>API Key</span><input id="provider-key" type="password" autocomplete="off" placeholder="sk-...（保存后不再回显）" /></label>
             <div class="provider-models">
               <label class="field"><span>大模型</span><select id="provider-llm-model"><option value="gpt-5.6-terra">gpt-5.6-terra</option></select></label>
-              <label class="field"><span>STT 模型</span><input id="provider-stt-model" value="mimo-v2.5-asr" spellcheck="false" autocomplete="off" placeholder="输入 STT 模型 ID" /></label>
+              <label class="field"><span>STT 模型</span><select id="provider-stt-model"><option value="seed-asr">Seed-ASR</option></select></label>
             </div>
             <div class="input-action-row"><button id="save-provider" class="secondary-button"><i data-lucide="save"></i><span>保存并验证</span></button><button id="remove-provider" class="text-button hidden">移除 Key</button></div>
           </section>
