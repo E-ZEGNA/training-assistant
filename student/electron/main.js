@@ -99,6 +99,15 @@ function friendlyError(error) {
 }
 
 function wireClientEvents() {
+  serviceClient.on('authorization-failed', () => {
+    if (!configStore.value.activationToken) return;
+    configStore.clearActivationToken();
+    answerInFlight = false;
+    nativeAudio?.stop().catch(() => {});
+    serviceClient.stopSession().catch(() => {});
+    mainWindow?.setAlwaysOnTop(false);
+    send('config:changed', configStore.publicValue());
+  });
   serviceClient.on('transcript', (event) => send('transcript:update', event));
   serviceClient.on('status', (event) => send('audio:status', event));
   serviceClient.on('answer-token', (event) => send('answer:token', event));

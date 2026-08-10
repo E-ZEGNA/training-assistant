@@ -128,7 +128,7 @@ test('student sessions use the assigned master pack and reject unassigned studen
   }
 });
 
-test('activation binds one code to one device and client IP', async () => {
+test('activation binds the code while authenticated requests tolerate public IP changes', async () => {
   const { application, baseUrl, dataDir } = await fixture({ trustProxy: true });
   try {
     const activate = (deviceId, ip) => fetch(`${baseUrl}/v1/student/activate`, {
@@ -136,9 +136,22 @@ test('activation binds one code to one device and client IP', async () => {
       headers: { 'content-type': 'application/json', 'x-real-ip': ip },
       body: JSON.stringify({ code: 'activate-me', deviceId }),
     });
-    assert.equal((await activate('device-12345678', '203.0.113.10')).status, 200);
+    const first = await activate('device-12345678', '203.0.113.10');
+    assert.equal(first.status, 200);
+    const { token } = await first.json();
     assert.equal((await activate('device-87654321', '203.0.113.10')).status, 409);
     assert.equal((await activate('device-12345678', '203.0.113.11')).status, 409);
+
+    await application.masterStore.put({ studentId: 'student-1', text: '用于公网 IP 漂移鉴权测试的独立主线程包内容。', version: 'v1' });
+    const session = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json', authorization: `Bearer ${token}`,
+        'x-device-id': 'device-12345678', 'x-real-ip': '203.0.113.11',
+      },
+      body: JSON.stringify({ supplement: '' }),
+    });
+    assert.equal(session.status, 201);
   } finally {
     await application.close();
     await rm(dataDir, { recursive: true, force: true });

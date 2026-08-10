@@ -37,7 +37,9 @@ class ServiceClient extends EventEmitter {
     });
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
-      throw new ServiceError(body.error ?? `请求失败 (${response.status})`, response.status, body.error);
+      const error = new ServiceError(body.error ?? `请求失败 (${response.status})`, response.status, body.error);
+      if (response.status === 401) this.emit('authorization-failed', error);
+      throw error;
     }
     return response;
   }

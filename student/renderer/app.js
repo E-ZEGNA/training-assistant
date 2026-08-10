@@ -435,6 +435,19 @@ api.onAnswerError(({ message }) => {
   state.currentAnswerNode = null;
   showToast(message, 'error');
 });
+api.onConfigChanged((config) => {
+  state.config = config;
+  if (!config.activated && state.meeting) {
+    stopCaptures();
+    state.meeting = false;
+    state.answerPending = false;
+    elements['meeting-view'].classList.add('hidden');
+    elements['setup-view'].classList.remove('hidden');
+    elements['header-status'].textContent = state.connected ? '服务已连接' : '待连接';
+  }
+  renderConfig();
+  if (!config.activated) showToast('激活状态已失效，请重新激活。', 'error');
+});
 
 elements['supplement'].addEventListener('input', () => {
   elements['supplement-count'].textContent = `${elements.supplement.value.length} / 30000`;
