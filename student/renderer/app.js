@@ -97,15 +97,20 @@ function renderProvider() {
 }
 
 function populateModelOptions(models = []) {
-  const available = [...new Set(['gpt-5.6-terra', 'mimo-v2.5-asr', ...models].filter(Boolean))].sort();
-  for (const id of ['provider-llm-model', 'provider-stt-model']) {
+  const available = [...new Set(models.filter(Boolean))].sort();
+  const isStt = (model) => /(?:asr|stt|whisper|speech-to-text)/i.test(model);
+  const groups = {
+    'provider-llm-model': [...new Set(['gpt-5.6-terra', ...available.filter((model) => !isStt(model))])].sort(),
+    'provider-stt-model': [...new Set(['mimo-v2.5-asr', ...available.filter(isStt)])].sort(),
+  };
+  for (const [id, options] of Object.entries(groups)) {
     const select = elements[id];
     const selected = select.value;
-    select.replaceChildren(...available.map((model) => Object.assign(document.createElement('option'), {
+    select.replaceChildren(...options.map((model) => Object.assign(document.createElement('option'), {
       value: model,
       textContent: model,
     })));
-    if (available.includes(selected)) select.value = selected;
+    if (options.includes(selected)) select.value = selected;
   }
 }
 
