@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
+import { XIAOMUAI_BASE_URL } from './xiaomuai.js';
 
 function required(name, { allowTestDefault = false } = {}) {
   const value = process.env[name]?.trim();
@@ -45,7 +46,7 @@ export function loadConfig(overrides = {}) {
     requireStudentProvider: overrides.requireStudentProvider ?? (test ? false : process.env.REQUIRE_STUDENT_PROVIDER !== 'false'),
     sttProvider: overrides.sttProvider ?? process.env.STT_PROVIDER ?? 'seed-asr',
     xiaomuai: {
-      baseUrl: (overrides.xiaomuaiBaseUrl ?? process.env.XIAOMUAI_BASE_URL ?? 'https://xiaomuai.cn/v1').replace(/\/$/, ''),
+      baseUrl: XIAOMUAI_BASE_URL,
       llmModel: overrides.xiaomuaiLlmModel ?? process.env.XIAOMUAI_LLM_MODEL ?? 'gpt-5.6-terra',
       sttModel: overrides.xiaomuaiSttModel ?? process.env.XIAOMUAI_STT_MODEL ?? 'mimo-v2.5-asr',
       timeoutMs: Number(overrides.xiaomuaiTimeoutMs ?? process.env.XIAOMUAI_TIMEOUT_MS ?? 2500),

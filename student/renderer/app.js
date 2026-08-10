@@ -3,8 +3,8 @@ const api = window.interviewAPI;
 const elements = Object.fromEntries([
   'header-status', 'setup-view', 'meeting-view', 'connection-summary', 'server-url', 'test-server',
   'activation-field', 'activation-code', 'activate-button', 'activated-row', 'deactivate-button',
-  'provider-section', 'provider-status', 'provider-base-url', 'provider-key', 'provider-llm-model',
-  'provider-stt-model', 'xiaomu-model-list', 'save-provider', 'remove-provider', 'xiaomu-register',
+  'provider-section', 'provider-status', 'provider-key', 'provider-llm-model',
+  'provider-stt-model', 'save-provider', 'remove-provider', 'xiaomu-register',
   'supplement', 'supplement-count', 'microphone-enabled', 'hotkey-recorder', 'start-button',
   'start-requirement',
   'audio-state', 'transcript-state', 'transcript-list', 'answer-state', 'answer-output',
@@ -89,13 +89,24 @@ function renderProvider() {
   if (provider.configured) {
     elements['provider-llm-model'].value = provider.llmModel;
     elements['provider-stt-model'].value = provider.sttModel;
-    elements['provider-status'].textContent = provider.llmAvailable
-      ? (provider.sttAvailable ? '大模型与 STT 均可用' : '大模型可用；STT 将使用 Seed-ASR')
-      : '所选大模型不可用';
+    elements['provider-status'].textContent = provider.llmAvailable ? '模型服务可用' : '所选大模型不可用';
   } else {
     elements['provider-status'].textContent = '尚未配置';
   }
   elements['remove-provider'].classList.toggle('hidden', !provider.configured);
+}
+
+function populateModelOptions(models = []) {
+  const available = [...new Set(['gpt-5.6-terra', 'mimo-v2.5-asr', ...models].filter(Boolean))].sort();
+  for (const id of ['provider-llm-model', 'provider-stt-model']) {
+    const select = elements[id];
+    const selected = select.value;
+    select.replaceChildren(...available.map((model) => Object.assign(document.createElement('option'), {
+      value: model,
+      textContent: model,
+    })));
+    if (available.includes(selected)) select.value = selected;
+  }
 }
 
 async function loadProvider() {
@@ -105,6 +116,16 @@ async function loadProvider() {
     return;
   }
   state.provider = await api.getProvider();
+  if (state.provider.configured) {
+    try {
+      const { models } = await api.getProviderModels();
+      populateModelOptions(models);
+    } catch {
+      populateModelOptions();
+    }
+  } else {
+    populateModelOptions();
+  }
   renderProvider();
   updateStartState();
 }
@@ -120,10 +141,10 @@ async function saveProvider() {
       sttModel: elements['provider-stt-model'].value.trim(),
     });
     elements['provider-key'].value = '';
-    renderProvider();
     const { models } = await api.getProviderModels();
-    elements['xiaomu-model-list'].replaceChildren(...models.map((model) => Object.assign(document.createElement('option'), { value: model })));
-    showToast(state.provider.sttAvailable ? 'XiaomuAI 配置已保存' : '大模型已配置，STT 将使用 Seed-ASR');
+    populateModelOptions(models);
+    renderProvider();
+    showToast('XiaomuAI 配置已保存');
   } catch (error) {
     showToast(errorMessage(error), 'error');
   } finally {

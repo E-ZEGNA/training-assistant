@@ -2,6 +2,9 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { SeedAsrStream } from './seed-asr.js';
 
+// Fixed student-provider endpoint; it is never accepted from student input.
+export const XIAOMUAI_BASE_URL = 'https://xiaomuai.cn/v1';
+
 function providerError(status, body) {
   // Do not reflect provider response text: upstream gateways occasionally
   // include request metadata or credentials in diagnostic messages.

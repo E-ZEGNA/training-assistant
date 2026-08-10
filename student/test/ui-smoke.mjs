@@ -54,7 +54,7 @@ try {
   await page.locator('#provider-key').fill(xiaomuaiKey);
   await page.locator('#save-provider').click();
   await page.waitForFunction(() => document.getElementById('provider-key')?.value === '', null, { timeout: 15_000 });
-  await page.locator('#provider-status').getByText('大模型可用；STT 将使用 Seed-ASR').waitFor();
+  await page.locator('#provider-status').getByText('模型服务可用').waitFor();
   await page.waitForFunction(() => document.getElementById('start-button')?.disabled === false, null, { timeout: 15_000 });
   await page.locator('#start-requirement').getByText('准备完成，可以开始面试').waitFor();
   await page.locator('#supplement').fill('本场应聘 ML Infra，重点考察 GPU 调度与训练稳定性。');
