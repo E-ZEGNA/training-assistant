@@ -76,7 +76,12 @@ jobs:
         if: env.HAS_MACOS_SIGNING != 'true'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm --workspace student run dist:mac:${{ matrix.arch }}
+        run: |
+          for attempt in 1 2 3; do
+            npm --workspace student run dist:mac:${{ matrix.arch }} && exit 0
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
       - name: Build signed and notarized package
         if: env.HAS_MACOS_SIGNING == 'true'
         env:
@@ -85,7 +90,12 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm --workspace student run dist:mac:${{ matrix.arch }}
+        run: |
+          for attempt in 1 2 3; do
+            npm --workspace student run dist:mac:${{ matrix.arch }} && exit 0
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: interview-assistant-macos-${{ matrix.arch }}-${{ github.run_id }}
