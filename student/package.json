@@ -1,13 +1,15 @@
 {
   "name": "@interview-assistant/student",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Internal real-time interview training assistant",
   "author": "Internal Training",
   "main": "electron/main.js",
   "scripts": {
     "prepare:assets": "node scripts/prepare-assets.js",
-    "prepare:native": "powershell -NoProfile -ExecutionPolicy Bypass -File native/build.ps1",
+    "prepare:native": "node scripts/prepare-native.js",
+    "prepare:native:win": "powershell -NoProfile -ExecutionPolicy Bypass -File native/build.ps1",
+    "prepare:native:mac": "bash native/build-mac.sh",
     "predev": "npm run prepare:assets && npm run prepare:native",
     "dev": "electron .",
     "test": "node --test test/*.test.js",
@@ -16,7 +18,10 @@
     "test:audio:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File test/generate-interview-audio.ps1",
     "test:audio:e2e": "node test/interview-audio-e2e.mjs",
     "predist:win": "npm run prepare:assets && npm run prepare:native",
-    "dist:win": "electron-builder --win nsis portable --x64"
+    "dist:win": "electron-builder --win nsis portable --x64",
+    "dist:mac:x64": "npm run prepare:assets && npm run prepare:native:mac -- x64 && electron-builder --mac dmg zip --x64",
+    "dist:mac:arm64": "npm run prepare:assets && npm run prepare:native:mac -- arm64 && electron-builder --mac dmg zip --arm64",
+    "dist:mac": "npm run dist:mac:x64 && npm run dist:mac:arm64"
   },
   "dependencies": {
     "ws": "^8.18.3"
@@ -37,19 +42,21 @@
       "node_modules/ws/**/*",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "native/bin",
-        "to": "native",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
     "directories": {
       "output": "release"
     },
     "win": {
+      "extraResources": [
+        {
+          "from": "native/bin",
+          "to": "native",
+          "filter": [
+            "InterviewAudioCapture.exe",
+            "NAudio.dll",
+            "THIRD_PARTY_NOTICES.txt"
+          ]
+        }
+      ],
       "target": [
         {
           "target": "nsis",
@@ -64,6 +71,30 @@
           ]
         }
       ]
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "minimumSystemVersion": "13.0",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "仅在你主动启用麦克风时采集你的声音。",
+        "NSScreenCaptureUsageDescription": "用于采集面试通话的系统声音并实时转写。"
+      },
+      "extraResources": [
+        {
+          "from": "native/bin",
+          "to": "native",
+          "filter": [
+            "InterviewAudioCapture"
+          ]
+        }
+      ],
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "Interview-Assistant-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

@@ -1,7 +1,7 @@
 # 架构与保密边界
 
 ```text
-Windows loopback / optional mic
+WASAPI or ScreenCaptureKit / optional mic
              |
              v
       Student Electron

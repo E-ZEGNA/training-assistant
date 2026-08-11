@@ -27,7 +27,7 @@ jobs:
 
   package-windows:
     name: Package Windows client
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test
     runs-on: windows-latest
     permissions:
@@ -42,15 +42,59 @@ jobs:
       - run: npm run build:student
       - uses: actions/upload-artifact@v4
         with:
-          name: interview-assistant-${{ github.ref_name }}
+          name: interview-assistant-windows-${{ github.run_id }}
           path: |
             student/release/Interview-Assistant-Setup-*.exe
             student/release/Interview-Assistant-Portable-*.exe
           if-no-files-found: error
+
+  package-macos:
+    name: Package macOS client (${{ matrix.arch }})
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm --workspace student run dist:mac:${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: interview-assistant-macos-${{ matrix.arch }}-${{ github.run_id }}
+          path: |
+            student/release/Interview-Assistant-*.dmg
+            student/release/Interview-Assistant-*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package-windows, package-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: interview-assistant-*-${{ github.run_id }}
+          path: release-assets
+          merge-multiple: true
       - name: Create GitHub release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $assets = Get-ChildItem -LiteralPath student/release -Filter 'Interview-Assistant-*.exe' | Select-Object -ExpandProperty FullName
-          gh release create $env:GITHUB_REF_NAME $assets --repo $env:GITHUB_REPOSITORY --title "面试助教 $env:GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY" --title "面试助教 $GITHUB_REF_NAME" --generate-notes
