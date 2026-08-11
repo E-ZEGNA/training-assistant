@@ -64,12 +64,7 @@ jobs:
     permissions:
       contents: read
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      HAS_MACOS_SIGNING: ${{ secrets.CSC_LINK != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -77,7 +72,20 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm --workspace student run dist:mac:${{ matrix.arch }}
+      - name: Build unsigned package
+        if: env.HAS_MACOS_SIGNING != 'true'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm --workspace student run dist:mac:${{ matrix.arch }}
+      - name: Build signed and notarized package
+        if: env.HAS_MACOS_SIGNING == 'true'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm --workspace student run dist:mac:${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: interview-assistant-macos-${{ matrix.arch }}-${{ github.run_id }}

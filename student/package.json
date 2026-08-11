@@ -18,9 +18,9 @@
     "test:audio:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File test/generate-interview-audio.ps1",
     "test:audio:e2e": "node test/interview-audio-e2e.mjs",
     "predist:win": "npm run prepare:assets && npm run prepare:native",
-    "dist:win": "electron-builder --win nsis portable --x64",
-    "dist:mac:x64": "npm run prepare:assets && npm run prepare:native:mac -- x64 && electron-builder --mac dmg zip --x64",
-    "dist:mac:arm64": "npm run prepare:assets && npm run prepare:native:mac -- arm64 && electron-builder --mac dmg zip --arm64",
+    "dist:win": "electron-builder --win nsis portable --x64 --publish never",
+    "dist:mac:x64": "npm run prepare:assets && npm run prepare:native:mac -- x64 && electron-builder --mac dmg zip --x64 --publish never",
+    "dist:mac:arm64": "npm run prepare:assets && npm run prepare:native:mac -- arm64 && electron-builder --mac dmg zip --arm64 --publish never",
     "dist:mac": "npm run dist:mac:x64 && npm run dist:mac:arm64"
   },
   "dependencies": {
