@@ -1,13 +1,13 @@
 # 面试助教
 
-内部培训用的 Windows 实时面试辅助工具。学生端只负责采集音频、提交本场补充包和展示答案；机密主线程包只保存在机构后端。
+内部培训用的 Windows/macOS 实时面试辅助工具。学生端只负责采集音频、提交本场补充包和展示答案；机密主线程包只保存在机构后端。
 
 ## 数据边界
 
 - 主线程包：发布方通过管理接口写入，AES-256-GCM 加密落盘。学生接口没有读取能力。
 - 补充包：学员每场开始时输入，只保存在服务端会话内存，结束或超时后清空。
 - 转写与答案：只保存在当前服务端会话内存，不写客户端数据库或日志。
-- 学员凭据：Windows `safeStorage` 加密保存；机构 API Key、ASR Key 和 LLM Key 不进入客户端。
+- 学员凭据：Electron `safeStorage` 调用系统凭据存储加密保存；机构 API Key、ASR Key 和 LLM Key 不进入客户端。
 - 激活绑定：激活码首次使用后绑定设备并记录公网 IP；后续请求校验 Token、设备和绑定状态，不因正常公网 IP 漂移失效。同一设备重新激活时会更新 IP 记录，不同设备仍会被拒绝。绑定数据只保存不可逆 HMAC，不保存原始设备标识或 IP。
 
 ## 本机启动
@@ -39,7 +39,7 @@ SEED_ASR_API_KEY=<机构密钥>
 SEED_ASR_RESOURCE_ID=volc.seedasr.sauc.duration
 ```
 
-学生端通过随安装包分发的原生 Windows WASAPI 组件采集默认回放设备，转换并发送 PCM16、16kHz、单声道、200ms 音频包；麦克风按需单独采集。后端连接 Seed-ASR，并从主包和本场补充包生成有限热词。
+学生端通过随安装包分发的原生组件采集系统声音：Windows 使用 WASAPI，macOS 13+ 使用 ScreenCaptureKit。两端均转换并发送 PCM16、16kHz、单声道、200ms 音频包；麦克风按需单独采集。后端连接 Seed-ASR，并从主包和本场补充包生成有限热词。
 
 ## 发布配置
 
@@ -61,6 +61,17 @@ npm run build:student
 ```
 
 产物位于 `student/release/`。
+
+在 macOS 上构建 Intel 和 Apple Silicon 内测包：
+
+```bash
+npm run test
+npm run build:student:mac
+```
+
+macOS 首次采集系统声音时会申请“屏幕与系统音频录制”权限，授权后需要重新打开应用。无 Apple Developer ID 的构建仅用于内部验收；正式分发需要 Developer ID 签名和 Apple 公证。
+
+CI 配置 `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD` 和 `APPLE_TEAM_ID` 后，会自动启用 macOS 签名和公证；未配置时仍可生成无签名内测包。
 
 ## 后端容器
 

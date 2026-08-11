@@ -56,16 +56,26 @@ test('renderer is isolated and remote navigation is blocked', () => {
   assert.match(main, /will-navigate/);
 });
 
-test('system audio uses the packaged WASAPI helper instead of Chromium display capture', () => {
+test('system audio uses platform-native helpers instead of Chromium display capture', () => {
   const main = read('electron/main.js');
   const renderer = read('renderer/app.js');
   const nativeAudio = read('electron/native-audio.js');
+  const nativeAudioPath = read('electron/native-audio-path.js');
   assert.match(main, /new NativeAudioCapture/);
   assert.match(main, /nativeAudio\.start\(\)/);
-  assert.match(main, /InterviewAudioCapture\.exe/);
+  assert.match(nativeAudioPath, /InterviewAudioCapture\.exe/);
+  assert.match(nativeAudioPath, /InterviewAudioCapture'/);
   assert.match(nativeAudio, /spawn\(this\.executablePath/);
   assert.doesNotMatch(main, /setDisplayMediaRequestHandler|desktopCapturer/);
   assert.doesNotMatch(renderer, /getDisplayMedia/);
+});
+
+test('macOS package declares native capture permissions and architecture-specific artifacts', () => {
+  const packageJson = JSON.parse(read('package.json'));
+  assert.equal(packageJson.build.mac.minimumSystemVersion, '13.0');
+  assert.match(packageJson.build.mac.extendInfo.NSScreenCaptureUsageDescription, /系统声音/);
+  assert.match(packageJson.build.mac.artifactName, /\$\{arch\}/);
+  assert.match(read('native/AudioCapture.swift'), /ScreenCaptureKit/);
 });
 
 test('transcripts stay on one visual line and answer rendering is frame-batched', () => {

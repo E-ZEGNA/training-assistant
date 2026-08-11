@@ -12,6 +12,7 @@
     "dev:student": "npm --workspace student run dev",
     "test": "npm --workspace server test && npm --workspace student test",
     "build:student": "npm --workspace student run dist:win",
+    "build:student:mac": "npm --workspace student run dist:mac",
     "publish:master": "npm --workspace server run publish-master --"
   },
   "engines": {

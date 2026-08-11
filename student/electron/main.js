@@ -3,6 +3,7 @@ const path = require('node:path');
 const { ConfigStore } = require('./config-store');
 const { ServiceClient, ServiceError } = require('./service-client');
 const { NativeAudioCapture } = require('./native-audio');
+const { nativeAudioPath } = require('./native-audio-path');
 
 let mainWindow = null;
 let configStore = null;
@@ -47,12 +48,6 @@ async function configureMediaCapture() {
     const ownPage = webContents.getURL().startsWith('file:');
     callback(ownPage && permission === 'media');
   });
-}
-
-function nativeAudioPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'native', 'InterviewAudioCapture.exe')
-    : path.join(__dirname, '..', 'native', 'bin', 'InterviewAudioCapture.exe');
 }
 
 function registerAnswerHotkey(accelerator, previous) {
@@ -181,7 +176,12 @@ app.whenReady().then(async () => {
   app.setAppUserModelId('cn.internal.interviewassistant');
   configStore = new ConfigStore();
   serviceClient = new ServiceClient(configStore);
-  nativeAudio = new NativeAudioCapture(nativeAudioPath());
+  nativeAudio = new NativeAudioCapture(nativeAudioPath({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDirectory: __dirname,
+  }), { platform: process.platform });
   nativeAudio.on('audio', (bytes) => serviceClient.sendAudio('system', bytes));
   nativeAudio.on('status', (event) => send('audio:status', { channel: 'system', ...event }));
   wireClientEvents();

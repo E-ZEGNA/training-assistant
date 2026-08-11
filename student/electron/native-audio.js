@@ -4,9 +4,10 @@ const { spawn } = require('node:child_process');
 const PACKET_BYTES = 3200 * 2;
 
 class NativeAudioCapture extends EventEmitter {
-  constructor(executablePath) {
+  constructor(executablePath, { platform = process.platform } = {}) {
     super();
     this.executablePath = executablePath;
+    this.platform = platform;
     this.child = null;
     this.stdoutBuffer = Buffer.alloc(0);
     this.stderrBuffer = '';
@@ -32,7 +33,10 @@ class NativeAudioCapture extends EventEmitter {
         else resolve(event);
       };
       const timer = setTimeout(() => {
-        finishStart(new Error('系统音频启动超时，请确认当前有可用的 Windows 播放设备'));
+        const hint = this.platform === 'darwin'
+          ? '请在系统设置的“隐私与安全性 > 屏幕与系统音频录制”中允许本应用，然后重新打开应用'
+          : '请确认当前有可用的 Windows 播放设备';
+        finishStart(new Error(`系统音频启动超时，${hint}`));
         this.stop().catch(() => {});
       }, 8_000);
 
