@@ -71,6 +71,8 @@ npm run build:student:mac
 
 macOS 首次采集系统声音时会申请“屏幕与系统音频录制”权限，授权后需要重新打开应用。无 Apple Developer ID 的构建仅用于内部验收；正式分发需要 Developer ID 签名和 Apple 公证。
 
+CI 配置 `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD` 和 `APPLE_TEAM_ID` 后，会自动启用 macOS 签名和公证；未配置时仍可生成无签名内测包。
+
 ## 后端容器
 
 复制 `deploy/server.env.example` 为 `deploy/server.env`，填入机构密钥后运行：
