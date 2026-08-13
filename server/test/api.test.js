@@ -76,9 +76,15 @@ test('student routes enforce authorization and supplement limits', async () => {
       body: JSON.stringify({ code: 'activate-me', deviceId: 'device-12345678' }),
     });
     const { token } = await activation.json();
+    const maxLengthUnicode = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-device-id': 'device-12345678' },
+      body: JSON.stringify({ supplement: '中'.repeat(30_000) }),
+    });
+    assert.equal(maxLengthUnicode.status, 201);
+
     const oversized = await fetch(`${baseUrl}/v1/sessions`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-device-id': 'device-12345678' },
-      body: JSON.stringify({ supplement: 'x'.repeat(30_001) }),
+      body: JSON.stringify({ supplement: '中'.repeat(30_001) }),
     });
     assert.equal(oversized.status, 400);
   } finally {

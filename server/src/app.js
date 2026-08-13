@@ -122,7 +122,7 @@ export function createApplication(config) {
         const claims = authStudent(req, config, bindingStore);
         if (!claims) return json(res, 401, { error: 'unauthorized' });
         if (!sessionLimiter.take(claims.sub)) return json(res, 429, { error: 'session_rate_limited' });
-        const body = await readJson(req, config.maxSupplementChars + 4096);
+        const body = await readJson(req, config.maxSupplementChars * 4 + 4096);
         const session = await sessionStore.create(claims.sub, String(body.supplement ?? ''));
         log('session_started', { sessionId: session.id, studentId: claims.sub, supplementCharacters: session.supplement.length });
         return json(res, 201, { id: session.id, expiresAt: new Date(session.expiresAt).toISOString() });
