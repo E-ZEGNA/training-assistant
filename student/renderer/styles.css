@@ -78,6 +78,10 @@ textarea { min-height: 112px; max-height: 220px; resize: vertical; padding: 11px
 input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(23, 117, 88, 0.12); }
 input::placeholder, textarea::placeholder { color: #99a39e; }
 .field-meta { align-self: flex-end; margin-top: -27px; margin-right: 9px; padding: 2px 4px; background: var(--surface); color: #87918c; font-size: 10px; pointer-events: none; }
+.field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.import-button { display: inline-flex; align-items: center; gap: 5px; padding: 2px 4px; border: 0; background: transparent; color: var(--green); font-size: 11px; }
+.import-button:hover { color: var(--green-dark); }
+.import-button svg { width: 14px; height: 14px; }
 
 .secondary-button, .primary-button, .danger-button, .hotkey-button, .text-button {
   border: 0;

@@ -11,7 +11,7 @@ async function fixture(overrides = {}) {
   const config = {
     host: '127.0.0.1', port: 0, publicBaseUrl: '', dataDir,
     masterEncryptionKey: randomBytes(32), adminApiKey: 'admin-secret', studentTokenSecret: 'student-secret',
-    activationCodes: new Map([['activate-me', 'student-1']]), sessionTtlMs: 60_000, maxSupplementChars: 30_000,
+    activationCodes: new Map([['activate-me', 'student-1']]), sessionTtlMs: 60_000, maxSupplementChars: 200_000,
     sttProvider: 'mock', seedAsr: {}, trustProxy: false, studentTokenTtlMs: 60_000,
     llm: { provider: 'api', codexConfigPath: '', codexAuthPath: '', baseUrl: 'http://invalid', apiKey: '', model: 'mock', reasoningEffort: 'low' },
     ...overrides,
@@ -78,13 +78,13 @@ test('student routes enforce authorization and supplement limits', async () => {
     const { token } = await activation.json();
     const maxLengthUnicode = await fetch(`${baseUrl}/v1/sessions`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-device-id': 'device-12345678' },
-      body: JSON.stringify({ supplement: '中'.repeat(30_000) }),
+      body: JSON.stringify({ supplement: '中'.repeat(200_000) }),
     });
     assert.equal(maxLengthUnicode.status, 201);
 
     const oversized = await fetch(`${baseUrl}/v1/sessions`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-device-id': 'device-12345678' },
-      body: JSON.stringify({ supplement: '中'.repeat(30_001) }),
+      body: JSON.stringify({ supplement: '中'.repeat(200_001) }),
     });
     assert.equal(oversized.status, 400);
   } finally {

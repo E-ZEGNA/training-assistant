@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('interviewAPI', {
   testServer: () => ipcRenderer.invoke('server:test'),
   activate: (code) => ipcRenderer.invoke('student:activate', code),
   deactivate: () => ipcRenderer.invoke('student:deactivate'),
+  importSupplement: () => ipcRenderer.invoke('supplement:import'),
   startSession: (payload) => ipcRenderer.invoke('session:start', payload),
   stopSession: () => ipcRenderer.invoke('session:stop'),
   triggerAnswer: () => ipcRenderer.invoke('answer:trigger'),

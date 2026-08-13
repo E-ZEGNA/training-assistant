@@ -11,8 +11,22 @@ test('supplement is submitted only as session input and never persisted', () => 
   const renderer = read('renderer/app.js');
   assert.doesNotMatch(config, /supplement/i);
   assert.match(renderer, /startSession\(\{ supplement, microphoneEnabled \}\)/);
-  assert.match(renderer, /elements\.supplement\.value = ''/);
+  assert.match(renderer, /updateSupplement\(''\)/);
   assert.doesNotMatch(renderer, /localStorage|sessionStorage|indexedDB/);
+});
+
+test('supplement supports 200,000 characters and local TXT or Markdown import', () => {
+  const main = read('electron/main.js');
+  const preload = read('electron/preload.js');
+  const renderer = read('renderer/app.js');
+  const html = read('renderer/index.html');
+  assert.match(main, /MAX_SUPPLEMENT_CHARS = 200_000/);
+  assert.match(main, /extensions: \['txt', 'md'\]/);
+  assert.match(main, /MAX_SUPPLEMENT_FILE_BYTES = 2 \* 1024 \* 1024/);
+  assert.match(preload, /supplement:import/);
+  assert.match(renderer, /MAX_SUPPLEMENT_CHARS = 200_000/);
+  assert.match(renderer, /api\.importSupplement\(\)/);
+  assert.match(html, /maxlength="200000"/);
 });
 
 test('activation token uses Electron safeStorage and renderer never receives it', () => {

@@ -1,4 +1,5 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, session } = require('electron');
+const { app, BrowserWindow, dialog, globalShortcut, ipcMain, session } = require('electron');
+const fs = require('node:fs/promises');
 const path = require('node:path');
 const { ConfigStore } = require('./config-store');
 const { ServiceClient, ServiceError } = require('./service-client');
@@ -10,6 +11,8 @@ let configStore = null;
 let serviceClient = null;
 let nativeAudio = null;
 let answerInFlight = false;
+const MAX_SUPPLEMENT_CHARS = 200_000;
+const MAX_SUPPLEMENT_FILE_BYTES = 2 * 1024 * 1024;
 
 function send(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
@@ -139,8 +142,25 @@ function registerIpc() {
     configStore.clearActivationToken();
     return configStore.publicValue();
   });
+  ipcMain.handle('supplement:import', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '导入补充包',
+      properties: ['openFile'],
+      filters: [{ name: '文本文件', extensions: ['txt', 'md'] }],
+    });
+    if (result.canceled || result.filePaths.length !== 1) return null;
+    const filePath = result.filePaths[0];
+    const extension = path.extname(filePath).toLowerCase();
+    if (extension !== '.txt' && extension !== '.md') throw new Error('仅支持 TXT 和 Markdown 文件');
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile() || stat.size > MAX_SUPPLEMENT_FILE_BYTES) throw new Error('文件不能超过 2 MB');
+    const text = await fs.readFile(filePath, 'utf8');
+    if (text.length > MAX_SUPPLEMENT_CHARS) throw new Error('文件内容不能超过 200,000 字符');
+    return { name: path.basename(filePath), text };
+  });
   ipcMain.handle('session:start', async (_event, payload) => {
     const supplement = String(payload?.supplement ?? '');
+    if (supplement.length > MAX_SUPPLEMENT_CHARS) throw new Error('补充包不能超过 200,000 字符');
     const microphoneEnabled = payload?.microphoneEnabled === true;
     const result = await serviceClient.startSession(supplement);
     try {
