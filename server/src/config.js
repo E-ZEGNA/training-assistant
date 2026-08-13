@@ -49,7 +49,7 @@ export function loadConfig(overrides = {}) {
     activationCodes: overrides.activationCodes ?? parseActivationCodes(process.env.STUDENT_ACTIVATION_CODES ?? (test ? 'test-code:test-student' : '')),
     trustProxy: parseBoolean(overrides.trustProxy ?? process.env.TRUST_PROXY, false),
     sessionTtlMs: Number(overrides.sessionTtlMs ?? process.env.SESSION_TTL_MS ?? 6 * 60 * 60 * 1000),
-    maxSupplementChars: Number(overrides.maxSupplementChars ?? process.env.MAX_SUPPLEMENT_CHARS ?? 30_000),
+    maxSupplementChars: Number(overrides.maxSupplementChars ?? process.env.MAX_SUPPLEMENT_CHARS ?? 200_000),
     sttProvider: overrides.sttProvider ?? process.env.STT_PROVIDER ?? 'seed-asr',
     seedAsr: {
       apiKey: overrides.seedAsrApiKey ?? process.env.SEED_ASR_API_KEY ?? '',

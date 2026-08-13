@@ -3,7 +3,7 @@ const api = window.interviewAPI;
 const elements = Object.fromEntries([
   'header-status', 'setup-view', 'meeting-view', 'connection-summary',
   'activation-field', 'activation-code', 'activate-button', 'activated-row', 'deactivate-button',
-  'supplement', 'supplement-count', 'microphone-enabled', 'hotkey-recorder', 'start-button',
+  'supplement', 'supplement-count', 'import-supplement-button', 'microphone-enabled', 'hotkey-recorder', 'start-button',
   'start-requirement',
   'audio-state', 'transcript-state', 'transcript-list', 'answer-state', 'answer-output',
   'answer-button', 'answer-hotkey-label', 'stop-button', 'minimize-button', 'hide-button', 'toast',
@@ -26,6 +26,12 @@ const state = {
   audioErrors: {},
   audioDeviceLabel: '系统音频已连接',
 };
+const MAX_SUPPLEMENT_CHARS = 200_000;
+
+function updateSupplement(text) {
+  elements.supplement.value = String(text ?? '').slice(0, MAX_SUPPLEMENT_CHARS);
+  elements['supplement-count'].textContent = `${elements.supplement.value.length} / ${MAX_SUPPLEMENT_CHARS}`;
+}
 
 function refreshIcons() {
   window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
@@ -239,8 +245,7 @@ async function startMeeting() {
     state.audioErrors = {};
     state.config = await api.updateConfig({ microphoneEnabled });
     const session = await api.startSession({ supplement, microphoneEnabled });
-    elements.supplement.value = '';
-    elements['supplement-count'].textContent = '0 / 30000';
+    updateSupplement('');
     if (microphoneEnabled) {
       try {
         await startCapture('mic');
@@ -455,7 +460,17 @@ api.onConfigChanged((config) => {
 });
 
 elements['supplement'].addEventListener('input', () => {
-  elements['supplement-count'].textContent = `${elements.supplement.value.length} / 30000`;
+  updateSupplement(elements.supplement.value);
+});
+elements['import-supplement-button'].addEventListener('click', async () => {
+  try {
+    const imported = await api.importSupplement();
+    if (!imported) return;
+    updateSupplement(imported.text);
+    showToast(`已导入 ${imported.name}`);
+  } catch (error) {
+    showToast(errorMessage(error), 'error');
+  }
 });
 elements['activate-button'].addEventListener('click', activate);
 elements['activation-code'].addEventListener('keydown', (event) => { if (event.key === 'Enter') activate(); });

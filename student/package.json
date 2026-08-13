@@ -1,6 +1,6 @@
 {
   "name": "@interview-assistant/student",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Internal real-time interview training assistant",
   "author": "Internal Training",
