@@ -61,7 +61,17 @@ try {
   await page.locator('#start-requirement').getByText('准备完成，可以开始面试').waitFor();
   await page.locator('#supplement').fill('本场应聘 ML Infra，重点考察 GPU 调度与训练稳定性。');
   await page.locator('#start-button').click();
-  await page.locator('#meeting-view').waitFor({ state: 'visible', timeout: 15_000 });
+  try {
+    await page.locator('#meeting-view').waitFor({ state: 'visible', timeout: 15_000 });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => ({
+      connection: document.getElementById('connection-summary')?.textContent,
+      header: document.getElementById('header-status')?.textContent,
+      requirement: document.getElementById('start-requirement')?.textContent,
+      toast: document.getElementById('toast')?.textContent,
+    }));
+    throw new Error(`Meeting UI failed to start: ${JSON.stringify(diagnostics)}; ${error.message}`);
+  }
   const answerEmptyAlignment = await page.evaluate(() => {
     const panel = document.getElementById('answer-output').getBoundingClientRect();
     const empty = document.querySelector('#answer-output > .empty-state').getBoundingClientRect();
@@ -147,20 +157,83 @@ try {
   if (!englishTranscript.includes('Please explain Java Please explain JavaScript')) {
     throw new Error(`Distinct English utterances were lost or joined without spacing: ${englishTranscript}`);
   }
+
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(560, 760));
+  await page.waitForTimeout(100);
+  const compactLayout = await page.evaluate(() => ({
+    viewportHeight: window.innerHeight,
+    answerHeight: document.getElementById('answer-output').getBoundingClientRect().height,
+    buttonBottom: document.getElementById('answer-button').getBoundingClientRect().bottom,
+  }));
+  const compactAnswerHeight = compactLayout.answerHeight;
+  if (compactLayout.buttonBottom > compactLayout.viewportHeight + 1) {
+    throw new Error(`Answer controls overflow the compact window: ${JSON.stringify(compactLayout)}`);
+  }
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(560, 960));
+  await page.waitForTimeout(100);
+  const expandedLayout = await page.evaluate(() => ({
+    viewportHeight: window.innerHeight,
+    answerHeight: document.getElementById('answer-output').getBoundingClientRect().height,
+    buttonBottom: document.getElementById('answer-button').getBoundingClientRect().bottom,
+  }));
+  const expandedAnswerHeight = expandedLayout.answerHeight;
+  if (expandedAnswerHeight < compactAnswerHeight + 120) {
+    throw new Error(`Answer output did not adapt to taller windows: ${JSON.stringify({ compactAnswerHeight, expandedAnswerHeight })}`);
+  }
+  if (expandedLayout.buttonBottom > expandedLayout.viewportHeight + 1) {
+    throw new Error(`Answer controls overflow the expanded window: ${JSON.stringify(expandedLayout)}`);
+  }
+
+  await application.evaluate(({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    contents.send('answer:started', { source: 'scroll-test' });
+    contents.send('answer:token', { token: Array.from({ length: 80 }, (_, index) => `滚动测试内容 ${index}`).join('\n') });
+  });
+  await page.waitForFunction(() => document.querySelectorAll('.answer-item').length === 3 && document.querySelector('.answer-item:last-child .answer-text')?.textContent.includes('滚动测试内容 79'));
+  const answerOutput = page.locator('#answer-output');
+  await answerOutput.evaluate((node) => { node.scrollTop = 0; });
+  const manualScrollTop = await answerOutput.evaluate((node) => node.scrollTop);
+  await application.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('answer:token', { token: '\n用户阅读上文时到达的新内容' });
+  });
+  await page.locator('.answer-item').last().getByText(/用户阅读上文时到达的新内容/).waitFor();
+  const preservedScrollTop = await answerOutput.evaluate((node) => node.scrollTop);
+  if (Math.abs(preservedScrollTop - manualScrollTop) > 1) {
+    throw new Error(`Streaming answer overrode manual scrolling: ${JSON.stringify({ manualScrollTop, preservedScrollTop })}`);
+  }
+  await answerOutput.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+  await application.evaluate(({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    contents.send('answer:token', { token: '\n回到底部后继续自动跟随' });
+    contents.send('answer:done', { answer: 'scroll-test' });
+  });
+  await page.locator('.answer-item').last().getByText(/回到底部后继续自动跟随/).waitFor();
+  const bottomDistance = await answerOutput.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight);
+  if (bottomDistance > 2) throw new Error(`Answer output stopped following at the bottom: ${bottomDistance}`);
   await page.screenshot({ path: path.join(reports, 'student-meeting-560.png') });
 
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(430, 700));
   await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(reports, 'student-meeting-430.png') });
 
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(430, 620));
+  await page.waitForTimeout(100);
   const layout = await page.evaluate(() => ({
     viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
     bodyScrollWidth: document.body.scrollWidth,
+    bodyScrollHeight: document.body.scrollHeight,
     answerWidth: document.getElementById('answer-output').getBoundingClientRect().width,
     buttonWidth: document.getElementById('answer-button').getBoundingClientRect().width,
+    buttonBottom: document.getElementById('answer-button').getBoundingClientRect().bottom,
   }));
+  layout.compactAnswerHeight = compactAnswerHeight;
+  layout.expandedAnswerHeight = expandedAnswerHeight;
   if (layout.bodyScrollWidth > layout.viewportWidth + 1) throw new Error(`Horizontal overflow: ${JSON.stringify(layout)}`);
   if (layout.answerWidth <= 0 || layout.buttonWidth <= 0) throw new Error(`Primary meeting controls are not visible: ${JSON.stringify(layout)}`);
+  if (layout.buttonBottom > layout.viewportHeight + 1 || layout.bodyScrollHeight > layout.viewportHeight + 1) {
+    throw new Error(`Meeting controls overflow the narrow window: ${JSON.stringify(layout)}`);
+  }
   if (pageErrors.length) throw new Error(`Renderer errors: ${pageErrors.join('; ')}`);
 
   await page.locator('#stop-button').click();

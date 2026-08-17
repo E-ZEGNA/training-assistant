@@ -180,14 +180,26 @@ function stopCaptures() {
   state.captures.clear();
 }
 
+function isAnswerOutputNearBottom() {
+  const output = elements['answer-output'];
+  return output.scrollHeight - output.scrollTop - output.clientHeight <= 32;
+}
+
+function followAnswerOutput(shouldFollow) {
+  if (!shouldFollow) return;
+  const output = elements['answer-output'];
+  output.scrollTop = output.scrollHeight;
+}
+
 function flushAnswerTokens() {
   if (state.answerRenderFrame !== null) cancelAnimationFrame(state.answerRenderFrame);
   state.answerRenderFrame = null;
   const token = state.answerTokenBuffer;
   state.answerTokenBuffer = '';
   if (!token || !state.currentAnswerNode) return;
+  const shouldFollow = isAnswerOutputNearBottom();
   state.currentAnswerNode.querySelector('.answer-text').textContent += token;
-  elements['answer-output'].scrollTop = elements['answer-output'].scrollHeight;
+  followAnswerOutput(shouldFollow);
 }
 
 function scheduleAnswerTokenFlush() {
@@ -396,6 +408,7 @@ api.onAudioStatus((event) => {
 });
 api.onAnswerStarted(() => {
   if (!state.meeting) return;
+  const shouldFollow = isAnswerOutputNearBottom();
   beginTranscriptSegment();
   resetAnswerTokenBuffer();
   state.answerPending = true;
@@ -408,7 +421,7 @@ api.onAnswerStarted(() => {
   item.querySelector('.answer-index').textContent = `回答 ${String(state.answerCount).padStart(2, '0')}`;
   elements['answer-output'].appendChild(item);
   state.currentAnswerNode = item;
-  elements['answer-output'].scrollTop = elements['answer-output'].scrollHeight;
+  followAnswerOutput(shouldFollow);
   elements['answer-state'].textContent = '正在生成';
 });
 api.onAnswerToken(({ token }) => {
@@ -419,8 +432,10 @@ api.onAnswerToken(({ token }) => {
 });
 api.onAnswerReplace(({ text }) => {
   if (!state.meeting || !state.currentAnswerNode) return;
+  const shouldFollow = isAnswerOutputNearBottom();
   resetAnswerTokenBuffer();
   state.currentAnswerNode.querySelector('.answer-text').textContent = text;
+  followAnswerOutput(shouldFollow);
 });
 api.onAnswerRetry(({ attempt, maxAttempts }) => {
   if (!state.meeting || !state.answerPending) return;
