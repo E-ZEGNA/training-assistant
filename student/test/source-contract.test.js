@@ -92,11 +92,15 @@ test('macOS package declares native capture permissions and architecture-specifi
   assert.match(read('native/AudioCapture.swift'), /ScreenCaptureKit/);
 });
 
-test('transcripts stay on one visual line and answer rendering is frame-batched', () => {
+test('transcripts stay on one line while answer rendering is batched and preserves manual scrolling', () => {
   const renderer = read('renderer/app.js');
   const styles = read('renderer/styles.css');
   assert.doesNotMatch(renderer, /children\.length > 80/);
   assert.match(renderer, /event\.utteranceId/);
   assert.match(renderer, /requestAnimationFrame/);
+  assert.match(renderer, /isAnswerOutputNearBottom/);
+  assert.match(renderer, /followAnswerOutput\(shouldFollow\)/);
   assert.match(styles, /\.transcript-item \.text \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
+  assert.match(styles, /\.answer-output \{[^}]*flex: 1 1 auto;[^}]*overflow-anchor: none;/s);
+  assert.doesNotMatch(styles, /\.answer-output \{[^}]*max-height:/s);
 });
