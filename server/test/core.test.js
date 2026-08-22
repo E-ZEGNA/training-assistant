@@ -156,8 +156,8 @@ test('Responses API provider uses server credentials and streams output text', a
     assert.equal(url, 'https://gateway.example/v1/responses');
     assert.equal(options.headers.authorization, 'Bearer server-only-token');
     const payload = JSON.parse(options.body);
-    assert.equal(payload.model, 'gpt-5.6-sol');
-    assert.equal(payload.reasoning.effort, 'low');
+    assert.equal(payload.model, 'gpt-5.6-terra');
+    assert.equal(payload.reasoning.effort, 'high');
     assert.equal(payload.store, false);
     assert.match(payload.instructions, /实时面试回答助手/);
     assert.match(payload.input, /介绍一下项目/);
@@ -172,7 +172,7 @@ test('Responses API provider uses server credentials and streams output text', a
   const answer = await generateInterviewAnswer({
     config: { llm: { provider: 'responses-api', apiKey: 'server-only-token', baseUrl: 'https://gateway.example/v1', model: 'gpt-5.6-sol', reasoningEffort: 'low', contextWindowTokens: 1_000_000 } },
     master: { text: '主线程证据与测试输出无逐字重合'.repeat(20) },
-    session: { supplement: '', answerHistory: [] },
+    session: { supplement: '', answerHistory: [], llmModel: 'gpt-5.6-terra', reasoningEffort: 'high' },
     transcriptContext: '介绍一下项目',
   });
   assert.equal(answer, '服务端流式回答');

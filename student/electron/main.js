@@ -90,6 +90,9 @@ function friendlyError(error) {
     answer_in_progress: '上一条回答仍在生成中，请稍候。',
     answer_generation_failed: '模型生成失败，请稍后重试。',
     answer_stream_interrupted: '回答传输中断，请重新生成。',
+    model_not_allowed: '所选模型已停用，请重新选择。',
+    reasoning_effort_not_allowed: '所选思考深度已停用，请重新选择。',
+    invalid_interview_options: '机构面试配置暂不可用，请稍后重试。',
     session_not_found: '本场会话已过期，请结束后重新开始。',
     unauthorized: '激活状态已失效，请重新激活。',
   };
@@ -128,6 +131,13 @@ function registerIpc() {
     const health = await serviceClient.health();
     return { ok: health.ok, masterPackConfigured: health.masterPackConfigured };
   });
+  ipcMain.handle('options:get', async () => {
+    try {
+      return await serviceClient.options();
+    } catch (error) {
+      throw new Error(friendlyError(error));
+    }
+  });
   ipcMain.handle('student:activate', async (_event, code) => {
     try {
       const result = await serviceClient.activate(String(code ?? '').trim(), configStore.value.deviceId);
@@ -162,7 +172,11 @@ function registerIpc() {
     const supplement = String(payload?.supplement ?? '');
     if (supplement.length > MAX_SUPPLEMENT_CHARS) throw new Error('补充包不能超过 200,000 字符');
     const microphoneEnabled = payload?.microphoneEnabled === true;
-    const result = await serviceClient.startSession(supplement);
+    const model = typeof payload?.model === 'string' ? payload.model.trim() : '';
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(model)) throw new Error('请选择有效的回答模型');
+    const reasoningEffort = typeof payload?.reasoningEffort === 'string' ? payload.reasoningEffort : '';
+    if (!['low', 'medium', 'high', 'xhigh'].includes(reasoningEffort)) throw new Error('请选择有效的思考深度');
+    const result = await serviceClient.startSession(supplement, model, reasoningEffort);
     try {
       const audio = process.env.STUDENT_E2E === '1' ? null : await nativeAudio.start();
       if (microphoneEnabled) serviceClient.enableMicrophone();

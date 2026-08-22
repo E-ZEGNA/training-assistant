@@ -22,6 +22,66 @@ function clientFor(baseUrl) {
   return client;
 }
 
+function inactiveClientFor(baseUrl) {
+  return new ServiceClient({
+    value: { serverUrl: baseUrl, activationToken: 'test-token', deviceId: 'test-device-1234' },
+  });
+}
+
+test('model options are fetched with student credentials and selected model starts the session', async () => {
+  const requests = [];
+  await withServer(async (req, res) => {
+    requests.push({
+      url: req.url,
+      method: req.method,
+      authorization: req.headers.authorization,
+      deviceId: req.headers['x-device-id'],
+      body: await new Promise((resolve) => {
+        let value = '';
+        req.on('data', (chunk) => { value += chunk; });
+        req.on('end', () => resolve(value));
+      }),
+    });
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/v1/student/options') {
+      res.end(JSON.stringify({
+        models: [{ id: 'gpt-5.6-sol', label: '质量优先' }, { id: 'gpt-5.6-terra', label: '均衡' }],
+        defaultModel: 'gpt-5.6-sol',
+        reasoningEfforts: [{ id: 'low', label: '轻量' }, { id: 'high', label: '深度' }],
+        defaultReasoningEffort: 'low',
+      }));
+      return;
+    }
+    res.statusCode = 201;
+    res.end(JSON.stringify({ id: 'selected-session', model: 'gpt-5.6-terra' }));
+  }, async (baseUrl) => {
+    const client = inactiveClientFor(baseUrl);
+    client.openAudioSocket = () => {};
+    const options = await client.options();
+    assert.equal(options.defaultModel, 'gpt-5.6-sol');
+    assert.equal(options.defaultReasoningEffort, 'low');
+    await client.startSession('本场补充', 'gpt-5.6-terra', 'high');
+    assert.equal(client.sessionId, 'selected-session');
+  });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].url, '/v1/student/options');
+  assert.equal(requests[0].authorization, 'Bearer test-token');
+  assert.equal(requests[0].deviceId, 'test-device-1234');
+  assert.deepEqual(JSON.parse(requests[1].body), {
+    supplement: '本场补充', model: 'gpt-5.6-terra', reasoningEffort: 'high',
+  });
+});
+
+test('invalid model option payload is rejected', async () => {
+  await withServer((_req, res) => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ models: [], defaultModel: 123 }));
+  }, async (baseUrl) => {
+    const client = inactiveClientFor(baseUrl);
+    await assert.rejects(client.options(), (error) => error instanceof ServiceError && error.code === 'invalid_interview_options');
+  });
+});
+
 test('answer consumes token and replacement events until done', async () => {
   await withServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });

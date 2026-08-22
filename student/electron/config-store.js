@@ -3,10 +3,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 
+const isModelId = (value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+
 const DEFAULTS = Object.freeze({
   serverUrl: process.env.INTERVIEW_SERVER_URL?.trim() || 'https://119.29.213.205',
   answerHotkey: 'CommandOrControl+1',
   microphoneEnabled: false,
+  llmModel: '',
+  reasoningEffort: '',
   activationToken: '',
   deviceId: '',
 });
@@ -27,6 +31,10 @@ class ConfigStore {
       const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
       this.value.answerHotkey = typeof raw.answerHotkey === 'string' ? raw.answerHotkey : DEFAULTS.answerHotkey;
       this.value.microphoneEnabled = raw.microphoneEnabled === true;
+      this.value.llmModel = isModelId(raw.llmModel) ? raw.llmModel : '';
+      this.value.reasoningEffort = ['low', 'medium', 'high', 'xhigh'].includes(raw.reasoningEffort)
+        ? raw.reasoningEffort
+        : '';
       this.value.deviceId = typeof raw.deviceId === 'string' ? raw.deviceId : '';
       if (typeof raw.activationTokenEncrypted === 'string' && safeStorage.isEncryptionAvailable()) {
         this.value.activationToken = safeStorage.decryptString(Buffer.from(raw.activationTokenEncrypted, 'base64'));
@@ -40,6 +48,8 @@ class ConfigStore {
     return {
       answerHotkey: this.value.answerHotkey,
       microphoneEnabled: this.value.microphoneEnabled,
+      llmModel: this.value.llmModel,
+      reasoningEffort: this.value.reasoningEffort,
       activated: Boolean(this.value.activationToken),
     };
   }
@@ -47,6 +57,12 @@ class ConfigStore {
   update(patch) {
     if (typeof patch.answerHotkey === 'string') this.value.answerHotkey = patch.answerHotkey;
     if (typeof patch.microphoneEnabled === 'boolean') this.value.microphoneEnabled = patch.microphoneEnabled;
+    if (isModelId(patch.llmModel)) {
+      this.value.llmModel = patch.llmModel;
+    }
+    if (['low', 'medium', 'high', 'xhigh'].includes(patch.reasoningEffort)) {
+      this.value.reasoningEffort = patch.reasoningEffort;
+    }
     this.persist();
     return this.publicValue();
   }
@@ -66,6 +82,8 @@ class ConfigStore {
     const serialized = {
       answerHotkey: this.value.answerHotkey,
       microphoneEnabled: this.value.microphoneEnabled,
+      llmModel: this.value.llmModel,
+      reasoningEffort: this.value.reasoningEffort,
       deviceId: this.value.deviceId,
     };
     if (this.value.activationToken) {

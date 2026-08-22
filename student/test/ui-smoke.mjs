@@ -59,6 +59,32 @@ try {
   }
   await page.waitForFunction(() => document.getElementById('start-button')?.disabled === false, null, { timeout: 15_000 });
   await page.locator('#start-requirement').getByText('准备完成，可以开始面试').waitFor();
+  const selectedModel = await page.locator('#model-select').inputValue();
+  if (!selectedModel || await page.locator('#model-select option').count() < 1) throw new Error('Model selector did not load');
+  const selectedReasoning = await page.locator('#reasoning-select').inputValue();
+  if (!selectedReasoning || await page.locator('#reasoning-select option').count() < 1) throw new Error('Reasoning selector did not load');
+  await page.screenshot({ path: path.join(reports, 'student-setup-active-560.png') });
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(430, 620));
+  await page.waitForTimeout(100);
+  const narrowSetup = await page.evaluate(() => {
+    const model = document.getElementById('model-select').getBoundingClientRect();
+    const reasoning = document.getElementById('reasoning-select').getBoundingClientRect();
+    return {
+      viewportWidth: window.innerWidth,
+      bodyScrollWidth: document.body.scrollWidth,
+      modelLeft: model.left,
+      modelRight: model.right,
+      reasoningLeft: reasoning.left,
+      reasoningRight: reasoning.right,
+    };
+  });
+  if (narrowSetup.bodyScrollWidth > narrowSetup.viewportWidth + 1
+    || narrowSetup.modelRight > narrowSetup.viewportWidth + 1
+    || narrowSetup.reasoningRight > narrowSetup.viewportWidth + 1) {
+    throw new Error(`Runtime selectors overflow the narrow setup view: ${JSON.stringify(narrowSetup)}`);
+  }
+  await page.screenshot({ path: path.join(reports, 'student-setup-active-430.png') });
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(560, 760));
   await page.locator('#supplement').fill('本场应聘 ML Infra，重点考察 GPU 调度与训练稳定性。');
   await page.locator('#start-button').click();
   try {
@@ -238,7 +264,7 @@ try {
 
   await page.locator('#stop-button').click();
   await page.locator('#setup-view').waitFor({ state: 'visible' });
-  process.stdout.write(`${JSON.stringify({ ok: true, screenshots: ['student-setup-560.png', 'student-meeting-560.png', 'student-meeting-430.png'], layout })}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: true, screenshots: ['student-setup-560.png', 'student-setup-active-560.png', 'student-setup-active-430.png', 'student-meeting-560.png', 'student-meeting-430.png'], narrowSetup, layout })}\n`);
 } finally {
   await application.close().catch(() => {});
   await rm(userData, { recursive: true, force: true });

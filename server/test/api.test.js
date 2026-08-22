@@ -13,7 +13,11 @@ async function fixture(overrides = {}) {
     masterEncryptionKey: randomBytes(32), adminApiKey: 'admin-secret', studentTokenSecret: 'student-secret',
     activationCodes: new Map([['activate-me', 'student-1']]), sessionTtlMs: 60_000, maxSupplementChars: 200_000,
     sttProvider: 'mock', seedAsr: {}, trustProxy: false, studentTokenTtlMs: 60_000,
-    llm: { provider: 'api', codexConfigPath: '', codexAuthPath: '', baseUrl: 'http://invalid', apiKey: '', model: 'mock', reasoningEffort: 'low' },
+    llm: {
+      provider: 'api', codexConfigPath: '', codexAuthPath: '', baseUrl: 'http://invalid', apiKey: '',
+      model: 'mock', allowedModels: ['mock', 'mock-fast'], reasoningEffort: 'low',
+      allowedReasoningEfforts: ['low', 'medium', 'high'],
+    },
     ...overrides,
   };
   const application = createApplication(config);
@@ -56,6 +60,81 @@ test('admin publishes without exposing master content to student endpoints', asy
       method: 'DELETE', headers: { authorization: `Bearer ${token}`, 'x-device-id': 'device-12345678', 'content-type': 'application/json' }, body: '{}',
     });
     assert.equal(response.status, 204);
+  } finally {
+    await application.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('student model options are authenticated, allowlisted, and pinned per session', async () => {
+  const { application, baseUrl, dataDir } = await fixture();
+  try {
+    await application.masterStore.put({ studentId: 'student-1', text: '用于模型选择接口测试的主线程资料。'.repeat(4), version: 'v1' });
+    let response = await fetch(`${baseUrl}/v1/student/options`);
+    assert.equal(response.status, 401);
+
+    const activation = await fetch(`${baseUrl}/v1/student/activate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: 'activate-me', deviceId: 'device-12345678' }),
+    });
+    const { token } = await activation.json();
+    const headers = {
+      'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-device-id': 'device-12345678',
+    };
+
+    response = await fetch(`${baseUrl}/v1/student/options`, { headers });
+    assert.equal(response.status, 200);
+    const options = await response.json();
+    assert.deepEqual(options, {
+      models: [{ id: 'mock', label: 'mock' }, { id: 'mock-fast', label: 'mock-fast' }],
+      defaultModel: 'mock',
+      reasoningEfforts: [
+        { id: 'low', label: '轻量' },
+        { id: 'medium', label: '标准' },
+        { id: 'high', label: '深度' },
+      ],
+      defaultReasoningEffort: 'low',
+    });
+    assert.doesNotMatch(JSON.stringify(options), /invalid|apiKey|baseUrl|provider/i);
+
+    response = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers, body: JSON.stringify({ supplement: '' }),
+    });
+    assert.equal(response.status, 201);
+    let body = await response.json();
+    assert.equal(body.model, 'mock');
+    assert.equal(body.reasoningEffort, 'low');
+    assert.equal(application.sessionStore.get(body.id, 'student-1').llmModel, 'mock');
+    assert.equal(application.sessionStore.get(body.id, 'student-1').reasoningEffort, 'low');
+
+    response = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers, body: JSON.stringify({ supplement: '', model: 'mock-fast', reasoningEffort: 'high' }),
+    });
+    assert.equal(response.status, 201);
+    body = await response.json();
+    assert.equal(body.model, 'mock-fast');
+    assert.equal(body.reasoningEffort, 'high');
+    const selectedSession = application.sessionStore.get(body.id, 'student-1');
+    assert.equal(selectedSession.llmModel, 'mock-fast');
+    assert.equal(selectedSession.reasoningEffort, 'high');
+
+    response = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers, body: JSON.stringify({ supplement: '', model: 'made-up-model' }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, 'model_not_allowed');
+
+    response = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers, body: JSON.stringify({ supplement: '', model: 'mock', reasoningEffort: 'ultra' }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, 'reasoning_effort_not_allowed');
+
+    response = await fetch(`${baseUrl}/v1/sessions`, {
+      method: 'POST', headers, body: JSON.stringify({ supplement: '', model: { id: 'mock' } }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, 'model_not_allowed');
   } finally {
     await application.close();
     await rm(dataDir, { recursive: true, force: true });

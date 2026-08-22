@@ -3,7 +3,7 @@ const api = window.interviewAPI;
 const elements = Object.fromEntries([
   'header-status', 'setup-view', 'meeting-view', 'connection-summary',
   'activation-field', 'activation-code', 'activate-button', 'activated-row', 'deactivate-button',
-  'supplement', 'supplement-count', 'import-supplement-button', 'microphone-enabled', 'hotkey-recorder', 'start-button',
+  'supplement', 'supplement-count', 'import-supplement-button', 'microphone-enabled', 'model-select', 'reasoning-select', 'hotkey-recorder', 'start-button',
   'start-requirement',
   'audio-state', 'transcript-state', 'transcript-list', 'answer-state', 'answer-output',
   'answer-button', 'answer-hotkey-label', 'stop-button', 'minimize-button', 'hide-button', 'toast',
@@ -13,6 +13,10 @@ const state = {
   config: null,
   connected: false,
   masterPackConfigured: false,
+  modelOptions: [],
+  defaultModel: '',
+  reasoningOptions: [],
+  defaultReasoningEffort: '',
   meeting: false,
   answerPending: false,
   answerCount: 0,
@@ -62,11 +66,46 @@ function renderConfig() {
   elements['answer-hotkey-label'].textContent = hotkey;
   elements['activation-field'].classList.toggle('hidden', state.config.activated);
   elements['activated-row'].classList.toggle('hidden', !state.config.activated);
+  renderRuntimeOptions();
   updateStartState();
 }
 
+function renderSelectOptions(select, options, selected, emptyText) {
+  select.replaceChildren();
+  if (options.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = emptyText;
+    select.appendChild(option);
+  } else {
+    for (const item of options) {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = item.label === item.id ? item.id : `${item.label} · ${item.id}`;
+      select.appendChild(option);
+    }
+    select.value = selected;
+  }
+}
+
+function renderRuntimeOptions() {
+  const modelIds = new Set(state.modelOptions.map((option) => option.id));
+  const selectedModel = modelIds.has(state.config?.llmModel) ? state.config.llmModel : state.defaultModel;
+  const reasoningIds = new Set(state.reasoningOptions.map((option) => option.id));
+  const selectedReasoning = reasoningIds.has(state.config?.reasoningEffort)
+    ? state.config.reasoningEffort
+    : state.defaultReasoningEffort;
+  const emptyText = state.config?.activated ? '正在加载' : '激活后加载';
+  renderSelectOptions(elements['model-select'], state.modelOptions, selectedModel, emptyText);
+  renderSelectOptions(elements['reasoning-select'], state.reasoningOptions, selectedReasoning, emptyText);
+  elements['model-select'].disabled = state.meeting || !state.config?.activated || state.modelOptions.length === 0;
+  elements['reasoning-select'].disabled = state.meeting || !state.config?.activated || state.reasoningOptions.length === 0;
+}
+
 function updateStartState() {
-  const ready = Boolean(state.config?.activated && state.connected && state.masterPackConfigured);
+  const modelReady = state.modelOptions.some((option) => option.id === elements['model-select'].value);
+  const reasoningReady = state.reasoningOptions.some((option) => option.id === elements['reasoning-select'].value);
+  const ready = Boolean(state.config?.activated && state.connected && state.masterPackConfigured && modelReady && reasoningReady);
   elements['start-button'].disabled = !ready;
   elements['start-requirement'].classList.toggle('ready', ready);
   if (!state.config?.activated) {
@@ -75,9 +114,48 @@ function updateStartState() {
     elements['start-requirement'].textContent = '机构服务暂不可用，请稍后重试';
   } else if (!state.masterPackConfigured) {
     elements['start-requirement'].textContent = '机构资料尚未就绪，请联系发布方';
+  } else if (!modelReady || !reasoningReady) {
+    elements['start-requirement'].textContent = '正在加载回答配置';
   } else {
     elements['start-requirement'].textContent = '准备完成，可以开始面试';
   }
+}
+
+async function loadOptions() {
+  if (!state.config?.activated) {
+    state.modelOptions = [];
+    state.defaultModel = '';
+    state.reasoningOptions = [];
+    state.defaultReasoningEffort = '';
+    renderConfig();
+    return;
+  }
+  const result = await api.getOptions();
+  const models = Array.isArray(result.models)
+    ? result.models.filter((item) => item && typeof item.id === 'string' && typeof item.label === 'string')
+    : [];
+  const reasoningEfforts = Array.isArray(result.reasoningEfforts)
+    ? result.reasoningEfforts.filter((item) => item && typeof item.id === 'string' && typeof item.label === 'string')
+    : [];
+  if (models.length === 0 || !models.some((item) => item.id === result.defaultModel)
+    || reasoningEfforts.length === 0
+    || !reasoningEfforts.some((item) => item.id === result.defaultReasoningEffort)) {
+    throw new Error('机构面试配置暂不可用');
+  }
+  state.modelOptions = models;
+  state.defaultModel = result.defaultModel;
+  state.reasoningOptions = reasoningEfforts;
+  state.defaultReasoningEffort = result.defaultReasoningEffort;
+  const selectedModel = models.some((item) => item.id === state.config.llmModel)
+    ? state.config.llmModel
+    : result.defaultModel;
+  const selectedReasoning = reasoningEfforts.some((item) => item.id === state.config.reasoningEffort)
+    ? state.config.reasoningEffort
+    : result.defaultReasoningEffort;
+  if (state.config.llmModel !== selectedModel || state.config.reasoningEffort !== selectedReasoning) {
+    state.config = await api.updateConfig({ llmModel: selectedModel, reasoningEffort: selectedReasoning });
+  }
+  renderConfig();
 }
 
 async function testServer() {
@@ -86,12 +164,24 @@ async function testServer() {
     const result = await api.testServer();
     state.connected = result.ok;
     state.masterPackConfigured = result.masterPackConfigured;
+    if (state.config?.activated) await loadOptions();
+    else {
+      state.modelOptions = [];
+      state.defaultModel = '';
+      state.reasoningOptions = [];
+      state.defaultReasoningEffort = '';
+      renderRuntimeOptions();
+    }
     elements['connection-summary'].textContent = result.masterPackConfigured ? '服务正常，机构资料已就绪' : '服务正常，机构资料尚未就绪';
     elements['header-status'].textContent = result.masterPackConfigured ? '服务已连接' : '等待机构资料';
     if (!result.masterPackConfigured) showToast('机构资料尚未就绪', 'error');
   } catch (error) {
     state.connected = false;
     state.masterPackConfigured = false;
+    state.modelOptions = [];
+    state.defaultModel = '';
+    state.reasoningOptions = [];
+    state.defaultReasoningEffort = '';
     elements['connection-summary'].textContent = '连接失败';
     elements['header-status'].textContent = '服务不可用';
     showToast(errorMessage(error), 'error');
@@ -252,11 +342,13 @@ async function startMeeting() {
   elements['start-button'].disabled = true;
   const supplement = elements.supplement.value;
   const microphoneEnabled = elements['microphone-enabled'].checked;
+  const model = elements['model-select'].value;
+  const reasoningEffort = elements['reasoning-select'].value;
   try {
     state.audioStatus = { system: 'connecting', mic: microphoneEnabled ? 'connecting' : 'disabled' };
     state.audioErrors = {};
-    state.config = await api.updateConfig({ microphoneEnabled });
-    const session = await api.startSession({ supplement, microphoneEnabled });
+    state.config = await api.updateConfig({ microphoneEnabled, llmModel: model, reasoningEffort });
+    const session = await api.startSession({ supplement, microphoneEnabled, model, reasoningEffort });
     updateSupplement('');
     if (microphoneEnabled) {
       try {
@@ -266,6 +358,7 @@ async function startMeeting() {
       }
     }
     state.meeting = true;
+    renderRuntimeOptions();
     resetMeetingUi();
     elements['setup-view'].classList.add('hidden');
     elements['meeting-view'].classList.remove('hidden');
@@ -292,6 +385,7 @@ async function stopMeeting() {
     elements['setup-view'].classList.remove('hidden');
     elements['header-status'].textContent = state.connected ? '服务已连接' : '待连接';
     elements['stop-button'].disabled = false;
+    renderRuntimeOptions();
     updateStartState();
   }
 }
@@ -470,6 +564,12 @@ api.onConfigChanged((config) => {
     elements['setup-view'].classList.remove('hidden');
     elements['header-status'].textContent = state.connected ? '服务已连接' : '待连接';
   }
+  if (!config.activated) {
+    state.modelOptions = [];
+    state.defaultModel = '';
+    state.reasoningOptions = [];
+    state.defaultReasoningEffort = '';
+  }
   renderConfig();
   if (!config.activated) showToast('激活状态已失效，请重新激活。', 'error');
 });
@@ -494,6 +594,28 @@ elements['deactivate-button'].addEventListener('click', async () => {
   renderConfig();
 });
 elements['hotkey-recorder'].addEventListener('click', beginHotkeyRecording);
+elements['model-select'].addEventListener('change', async () => {
+  const model = elements['model-select'].value;
+  if (!state.modelOptions.some((option) => option.id === model)) return renderRuntimeOptions();
+  try {
+    state.config = await api.updateConfig({ llmModel: model });
+    renderConfig();
+  } catch (error) {
+    renderRuntimeOptions();
+    showToast(errorMessage(error), 'error');
+  }
+});
+elements['reasoning-select'].addEventListener('change', async () => {
+  const reasoningEffort = elements['reasoning-select'].value;
+  if (!state.reasoningOptions.some((option) => option.id === reasoningEffort)) return renderRuntimeOptions();
+  try {
+    state.config = await api.updateConfig({ reasoningEffort });
+    renderConfig();
+  } catch (error) {
+    renderRuntimeOptions();
+    showToast(errorMessage(error), 'error');
+  }
+});
 elements['start-button'].addEventListener('click', startMeeting);
 elements['stop-button'].addEventListener('click', stopMeeting);
 elements['answer-button'].addEventListener('click', triggerAnswer);

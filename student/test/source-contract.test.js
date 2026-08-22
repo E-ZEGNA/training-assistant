@@ -10,9 +10,28 @@ test('supplement is submitted only as session input and never persisted', () => 
   const config = read('electron/config-store.js');
   const renderer = read('renderer/app.js');
   assert.doesNotMatch(config, /supplement/i);
-  assert.match(renderer, /startSession\(\{ supplement, microphoneEnabled \}\)/);
+  assert.match(renderer, /startSession\(\{ supplement, microphoneEnabled, model, reasoningEffort \}\)/);
   assert.match(renderer, /updateSupplement\(''\)/);
   assert.doesNotMatch(renderer, /localStorage|sessionStorage|indexedDB/);
+});
+
+test('model and reasoning selection are server allowlisted, persisted without secrets, and sent only at session start', () => {
+  const config = read('electron/config-store.js');
+  const client = read('electron/service-client.js');
+  const main = read('electron/main.js');
+  const preload = read('electron/preload.js');
+  const renderer = read('renderer/app.js');
+  const html = read('renderer/index.html');
+  assert.match(client, /request\('\/v1\/student\/options'\)/);
+  assert.match(client, /JSON\.stringify\(\{ supplement, model, reasoningEffort \}\)/);
+  assert.match(main, /serviceClient\.startSession\(supplement, model, reasoningEffort\)/);
+  assert.match(preload, /getOptions:/);
+  assert.match(renderer, /api\.getOptions\(\)/);
+  assert.match(html, /id="model-select"/);
+  assert.match(html, /id="reasoning-select"/);
+  assert.match(config, /llmModel/);
+  assert.match(config, /reasoningEffort/);
+  assert.doesNotMatch(renderer, /LLM_API_KEY|apiKey|baseUrl|serverUrl/);
 });
 
 test('supplement supports 200,000 characters and local TXT or Markdown import', () => {

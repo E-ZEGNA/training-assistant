@@ -11,7 +11,7 @@ export class SessionStore {
     this.cleanupTimer.unref?.();
   }
 
-  async create(studentId, supplement) {
+  async create(studentId, supplement, requestedModel, requestedReasoningEffort) {
     if (typeof supplement !== 'string') {
       const error = new Error('Supplement must be text');
       error.statusCode = 400;
@@ -20,6 +20,30 @@ export class SessionStore {
     if (supplement.length > this.config.maxSupplementChars) {
       const error = new Error('Supplement is too large');
       error.statusCode = 400;
+      throw error;
+    }
+    const defaultModel = this.config.llm?.model ?? '';
+    const allowedModels = Array.isArray(this.config.llm?.allowedModels)
+      ? this.config.llm.allowedModels
+      : [defaultModel];
+    const llmModel = requestedModel == null || requestedModel === '' ? defaultModel : requestedModel;
+    if (typeof llmModel !== 'string' || !allowedModels.includes(llmModel)) {
+      const error = new Error('Selected model is not allowed');
+      error.statusCode = 400;
+      error.publicCode = 'model_not_allowed';
+      throw error;
+    }
+    const defaultReasoningEffort = this.config.llm?.reasoningEffort ?? '';
+    const allowedReasoningEfforts = Array.isArray(this.config.llm?.allowedReasoningEfforts)
+      ? this.config.llm.allowedReasoningEfforts
+      : [defaultReasoningEffort];
+    const reasoningEffort = requestedReasoningEffort == null || requestedReasoningEffort === ''
+      ? defaultReasoningEffort
+      : requestedReasoningEffort;
+    if (typeof reasoningEffort !== 'string' || !allowedReasoningEfforts.includes(reasoningEffort)) {
+      const error = new Error('Selected reasoning effort is not allowed');
+      error.statusCode = 400;
+      error.publicCode = 'reasoning_effort_not_allowed';
       throw error;
     }
     let master;
@@ -41,6 +65,8 @@ export class SessionStore {
     const session = {
       id: randomUUID(),
       studentId,
+      llmModel,
+      reasoningEffort,
       supplement,
       createdAt: now,
       expiresAt: now + this.config.sessionTtlMs,

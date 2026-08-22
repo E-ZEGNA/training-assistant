@@ -34,9 +34,38 @@ function parseBoolean(raw, fallback = false) {
   throw new Error(`Invalid boolean value: ${raw}`);
 }
 
+function parseAllowedModels(raw, defaultModel) {
+  const values = Array.isArray(raw) ? raw : String(raw ?? defaultModel).split(',');
+  const models = [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
+  if (models.length === 0) throw new Error('LLM_ALLOWED_MODELS must contain at least one model');
+  for (const model of models) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(model)) {
+      throw new Error(`LLM_ALLOWED_MODELS contains an invalid model ID: ${model}`);
+    }
+  }
+  if (!models.includes(defaultModel)) throw new Error('LLM_MODEL must be included in LLM_ALLOWED_MODELS');
+  return models;
+}
+
+function parseAllowedReasoningEfforts(raw, defaultEffort) {
+  const supported = new Set(['low', 'medium', 'high', 'xhigh']);
+  const values = Array.isArray(raw) ? raw : String(raw ?? defaultEffort).split(',');
+  const efforts = [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
+  if (efforts.length === 0) throw new Error('LLM_ALLOWED_REASONING_EFFORTS must contain at least one value');
+  if (efforts.some((effort) => !supported.has(effort))) {
+    throw new Error('LLM_ALLOWED_REASONING_EFFORTS contains an unsupported value');
+  }
+  if (!efforts.includes(defaultEffort)) {
+    throw new Error('LLM_REASONING_EFFORT must be included in LLM_ALLOWED_REASONING_EFFORTS');
+  }
+  return efforts;
+}
+
 export function loadConfig(overrides = {}) {
   const test = process.env.NODE_ENV === 'test';
   const encryptionRaw = overrides.masterEncryptionKeyRaw ?? required('MASTER_ENCRYPTION_KEY', { allowTestDefault: true });
+  const llmModel = overrides.llmModel ?? process.env.LLM_MODEL ?? 'gpt-5.6-sol';
+  const llmReasoningEffort = overrides.llmReasoningEffort ?? process.env.LLM_REASONING_EFFORT ?? 'low';
   return {
     host: overrides.host ?? process.env.HOST ?? '127.0.0.1',
     port: Number(overrides.port ?? process.env.PORT ?? 8787),
@@ -62,8 +91,13 @@ export function loadConfig(overrides = {}) {
       codexAuthPath: overrides.codexAuthPath ?? process.env.CODEX_AUTH_PATH ?? '',
       baseUrl: (overrides.llmBaseUrl ?? process.env.LLM_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, ''),
       apiKey: overrides.llmApiKey ?? process.env.LLM_API_KEY ?? '',
-      model: overrides.llmModel ?? process.env.LLM_MODEL ?? 'gpt-5.6-sol',
-      reasoningEffort: overrides.llmReasoningEffort ?? process.env.LLM_REASONING_EFFORT ?? 'low',
+      model: llmModel,
+      allowedModels: parseAllowedModels(overrides.llmAllowedModels ?? process.env.LLM_ALLOWED_MODELS, llmModel),
+      reasoningEffort: llmReasoningEffort,
+      allowedReasoningEfforts: parseAllowedReasoningEfforts(
+        overrides.llmAllowedReasoningEfforts ?? process.env.LLM_ALLOWED_REASONING_EFFORTS,
+        llmReasoningEffort,
+      ),
       contextWindowTokens: Number(overrides.llmContextWindowTokens ?? process.env.LLM_CONTEXT_WINDOW_TOKENS ?? 1_000_000),
     },
   };

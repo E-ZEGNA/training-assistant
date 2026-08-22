@@ -50,8 +50,12 @@ LLM_PROVIDER=responses-api
 LLM_BASE_URL=https://fushengyunsuan.cn/v1
 LLM_API_KEY=<机构专用密钥，仅保存在服务端>
 LLM_MODEL=gpt-5.6-sol
+LLM_ALLOWED_MODELS=gpt-5.6-sol,gpt-5.6-terra,gpt-5.5,gpt-5.4-mini
 LLM_REASONING_EFFORT=low
+LLM_ALLOWED_REASONING_EFFORTS=low,medium,high
 ```
+
+`LLM_MODEL` 和 `LLM_REASONING_EFFORT` 是旧客户端与新会话的默认值，并且必须分别包含在对应白名单中。学生端只会看到白名单里的模型和思考深度；两者在开始面试时锁定，本场中途不能切换，API 地址和密钥始终只保存在服务端。
 
 构建 Windows 安装包和便携版：
 

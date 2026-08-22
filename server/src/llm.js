@@ -182,14 +182,14 @@ async function* retryBeforeFirstToken(createStream, signal, onRetry, maxAttempts
   }
 }
 
-async function* callCodexConfigApi(config, system, user, signal) {
+async function* callCodexConfigApi(config, model, reasoningEffort, system, user, signal) {
   const local = await loadLocalCodexCredentials(config.llm);
   if (local.wireApi !== 'responses') throw new Error(`Unsupported Codex provider wire_api: ${local.wireApi}`);
   yield* callResponsesApi({
     baseUrl: local.baseUrl,
     apiKey: local.apiKey,
-    model: config.llm.model || local.model,
-    reasoningEffort: config.llm.reasoningEffort,
+    model: model || local.model,
+    reasoningEffort,
     system,
     user,
     signal,
@@ -261,14 +261,14 @@ async function* callResponsesApi({ baseUrl, apiKey, model, reasoningEffort, syst
   }
 }
 
-async function* callDedicatedApi(config, system, user, signal) {
+async function* callDedicatedApi(config, model, reasoningEffort, system, user, signal) {
   if (!config.llm.apiKey) throw new Error('LLM_API_KEY is not configured');
   const response = await fetch(`${config.llm.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.llm.apiKey}` },
     body: JSON.stringify({
-      model: config.llm.model,
-      reasoning_effort: config.llm.reasoningEffort,
+      model,
+      reasoning_effort: reasoningEffort,
       stream: true,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
     }),
@@ -295,20 +295,24 @@ export async function generateInterviewAnswer({ config, master, session, transcr
   }
   const evidence = retrieveChunks(master.text, `${currentQuestion}\n${session.supplement}`, 4);
   const { system, user } = buildInterviewPrompt({ config, session, currentQuestion, evidence });
+  const model = session.llmModel || config.llm.model;
+  const reasoningEffort = session.reasoningEffort || config.llm.reasoningEffort;
 
   let createStream;
   if (config.llm.provider === 'codex-config') {
-    createStream = () => callCodexConfigApi(config, system, `${user}\n\n只输出候选人要说的答案。`, signal);
+    createStream = () => callCodexConfigApi(config, model, reasoningEffort, system, `${user}\n\n只输出候选人要说的答案。`, signal);
   } else if (config.llm.provider === 'responses-api') {
     createStream = () => callResponsesApi({
       ...config.llm,
+      model,
+      reasoningEffort,
       system,
       user: `${user}\n\n只输出候选人要说的答案。`,
       signal,
       providerName: 'Responses API',
     });
   } else {
-    createStream = () => callDedicatedApi(config, system, user, signal);
+    createStream = () => callDedicatedApi(config, model, reasoningEffort, system, user, signal);
   }
   const stream = retryBeforeFirstToken(createStream, signal, onRetry);
   let answer = '';
