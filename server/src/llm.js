@@ -197,28 +197,63 @@ async function* callCodexConfigApi(config, system, user, signal) {
   });
 }
 
-async function* callResponsesApi({ baseUrl, apiKey, model, reasoningEffort, system, user, signal, providerName = 'Responses API' }) {
-  if (!apiKey) throw new Error('LLM_API_KEY is not configured');
-  const response = await fetch(`${baseUrl}/responses`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      reasoning: { effort: reasoningEffort },
-      store: false,
-      stream: true,
+function responsesPayload({ model, reasoningEffort, system, user, compatibility = false }) {
+  const common = {
+    model,
+    reasoning: { effort: reasoningEffort },
+    store: false,
+    stream: true,
+  };
+  if (compatibility) {
+    return {
+      ...common,
       input: [
         { role: 'system', content: [{ type: 'input_text', text: system }] },
         { role: 'user', content: [{ type: 'input_text', text: user }] },
       ],
-    }),
+    };
+  }
+  return { ...common, instructions: system, input: user };
+}
+
+async function responsesRequest({ baseUrl, apiKey, model, reasoningEffort, system, user, signal, compatibility }) {
+  return fetch(`${baseUrl}/responses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(responsesPayload({ model, reasoningEffort, system, user, compatibility })),
     signal,
   });
+}
+
+async function responseError(response, providerName) {
+  const requestId = response.headers.get('x-request-id') ?? 'unknown';
+  const body = await response.text().catch(() => '');
+  let upstreamMessage = '';
+  try {
+    const parsed = JSON.parse(body);
+    upstreamMessage = String(parsed?.error?.message ?? parsed?.message ?? parsed?.error ?? '');
+  } catch {
+    upstreamMessage = body;
+  }
+  const error = new Error(`${providerName} request failed (${response.status}, request ${requestId})`);
+  error.statusCode = response.status;
+  error.upstreamMessage = upstreamMessage.slice(0, 500);
+  return error;
+}
+
+function missingUserMessage(error) {
+  return error?.statusCode === 400
+    && /at least one nonempty user message is required/i.test(error?.upstreamMessage ?? '');
+}
+
+async function* callResponsesApi({ baseUrl, apiKey, model, reasoningEffort, system, user, signal, providerName = 'Responses API' }) {
+  if (!apiKey) throw new Error('LLM_API_KEY is not configured');
+  let response = await responsesRequest({ baseUrl, apiKey, model, reasoningEffort, system, user, signal, compatibility: false });
   if (!response.ok) {
-    const requestId = response.headers.get('x-request-id') ?? 'unknown';
-    const error = new Error(`${providerName} request failed (${response.status}, request ${requestId})`);
-    error.statusCode = response.status;
-    throw error;
+    const error = await responseError(response, providerName);
+    if (!missingUserMessage(error)) throw error;
+    response = await responsesRequest({ baseUrl, apiKey, model, reasoningEffort, system, user, signal, compatibility: true });
+    if (!response.ok) throw await responseError(response, providerName);
   }
   for await (const event of readSseJson(response)) {
     if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') yield event.delta;
