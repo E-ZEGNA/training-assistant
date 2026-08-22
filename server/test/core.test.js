@@ -159,6 +159,8 @@ test('Responses API provider uses server credentials and streams output text', a
     assert.equal(payload.model, 'gpt-5.6-sol');
     assert.equal(payload.reasoning.effort, 'low');
     assert.equal(payload.store, false);
+    assert.match(payload.instructions, /实时面试回答助手/);
+    assert.match(payload.input, /介绍一下项目/);
     return new Response(new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"服务端流式回答"}\n\n'));
@@ -174,6 +176,39 @@ test('Responses API provider uses server credentials and streams output text', a
     transcriptContext: '介绍一下项目',
   });
   assert.equal(answer, '服务端流式回答');
+});
+
+test('Responses API retries the alternate message shape for a gateway missing-user 400', async (context) => {
+  const requests = [];
+  const encoder = new TextEncoder();
+  context.mock.method(globalThis, 'fetch', async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({ error: { message: 'at least one nonempty user message is required' } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"兼容格式成功"}\n\n'));
+        controller.close();
+      },
+    }), { status: 200 });
+  });
+
+  const answer = await generateInterviewAnswer({
+    config: { llm: { provider: 'responses-api', apiKey: 'test', baseUrl: 'https://gateway.example/v1', model: 'gpt-5.6-sol', reasoningEffort: 'low', contextWindowTokens: 1_000_000 } },
+    master: { text: '与输出内容不重合的候选人经历资料'.repeat(20) },
+    session: { supplement: '', answerHistory: [] },
+    transcriptContext: '请介绍项目',
+  });
+  assert.equal(answer, '兼容格式成功');
+  assert.equal(requests.length, 2);
+  assert.equal(typeof requests[0].input, 'string');
+  assert.equal(requests[0].input.trim().length > 0, true);
+  assert.equal(requests[1].input[1].role, 'user');
+  assert.equal(requests[1].input[1].content[0].text.trim().length > 0, true);
 });
 
 test('LLM retries a transient failure only before the first output token', async (context) => {
