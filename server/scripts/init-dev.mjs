@@ -27,7 +27,9 @@ const content = [
   'CODEX_CONFIG_PATH=',
   'CODEX_AUTH_PATH=',
   'LLM_MODEL=gpt-5.6-sol',
+  'LLM_ALLOWED_MODELS=gpt-5.6-sol,gpt-5.6-terra,gpt-5.5,gpt-5.4-mini',
   'LLM_REASONING_EFFORT=low',
+  'LLM_ALLOWED_REASONING_EFFORTS=low,medium,high',
   '',
 ].join('\n');
 await writeFile(target, content, { encoding: 'utf8', mode: 0o600 });

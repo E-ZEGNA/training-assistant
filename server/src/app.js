@@ -8,6 +8,33 @@ import { generateInterviewAnswer, llmErrorDetails } from './llm.js';
 import { json, noContent, RateLimiter, readJson, route } from './http-utils.js';
 import { SessionStore } from './sessions.js';
 
+const MODEL_LABELS = Object.freeze({
+  'gpt-5.6-sol': '质量优先',
+  'gpt-5.6-terra': '均衡',
+  'gpt-5.5': '稳定备选',
+  'gpt-5.4-mini': '速度优先',
+});
+
+const REASONING_LABELS = Object.freeze({
+  low: '轻量',
+  medium: '标准',
+  high: '深度',
+  xhigh: '极深',
+});
+
+function studentOptions(config) {
+  const models = Array.isArray(config.llm.allowedModels) ? config.llm.allowedModels : [config.llm.model];
+  const reasoningEfforts = Array.isArray(config.llm.allowedReasoningEfforts)
+    ? config.llm.allowedReasoningEfforts
+    : [config.llm.reasoningEffort];
+  return {
+    models: models.map((id) => ({ id, label: MODEL_LABELS[id] ?? id })),
+    defaultModel: config.llm.model,
+    reasoningEfforts: reasoningEfforts.map((id) => ({ id, label: REASONING_LABELS[id] ?? id })),
+    defaultReasoningEffort: config.llm.reasoningEffort,
+  };
+}
+
 function log(event, details = {}) {
   process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), event, ...details })}\n`);
 }
@@ -118,14 +145,44 @@ export function createApplication(config) {
         return json(res, 200, { token, studentId });
       }
 
+      if (req.method === 'GET' && pathname === '/v1/student/options') {
+        const claims = authStudent(req, config, bindingStore);
+        if (!claims) return json(res, 401, { error: 'unauthorized' });
+        return json(res, 200, studentOptions(config));
+      }
+
       if (req.method === 'POST' && pathname === '/v1/sessions') {
         const claims = authStudent(req, config, bindingStore);
         if (!claims) return json(res, 401, { error: 'unauthorized' });
         if (!sessionLimiter.take(claims.sub)) return json(res, 429, { error: 'session_rate_limited' });
         const body = await readJson(req, config.maxSupplementChars * 4 + 4096);
-        const session = await sessionStore.create(claims.sub, String(body.supplement ?? ''));
-        log('session_started', { sessionId: session.id, studentId: claims.sub, supplementCharacters: session.supplement.length });
-        return json(res, 201, { id: session.id, expiresAt: new Date(session.expiresAt).toISOString() });
+        if (body.model != null && typeof body.model !== 'string') {
+          return json(res, 400, { error: 'model_not_allowed' });
+        }
+        if (body.reasoningEffort != null && typeof body.reasoningEffort !== 'string') {
+          return json(res, 400, { error: 'reasoning_effort_not_allowed' });
+        }
+        const requestedModel = body.model == null ? undefined : body.model.trim();
+        const requestedReasoningEffort = body.reasoningEffort == null ? undefined : body.reasoningEffort.trim();
+        const session = await sessionStore.create(
+          claims.sub,
+          String(body.supplement ?? ''),
+          requestedModel,
+          requestedReasoningEffort,
+        );
+        log('session_started', {
+          sessionId: session.id,
+          studentId: claims.sub,
+          model: session.llmModel,
+          reasoningEffort: session.reasoningEffort,
+          supplementCharacters: session.supplement.length,
+        });
+        return json(res, 201, {
+          id: session.id,
+          model: session.llmModel,
+          reasoningEffort: session.reasoningEffort,
+          expiresAt: new Date(session.expiresAt).toISOString(),
+        });
       }
 
       const answerParams = route(pathname, '/v1/sessions/:id/answer');

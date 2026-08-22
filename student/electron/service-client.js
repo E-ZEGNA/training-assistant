@@ -57,11 +57,21 @@ class ServiceClient extends EventEmitter {
     return response.json();
   }
 
-  async startSession(supplement) {
+  async options() {
+    const response = await this.request('/v1/student/options');
+    const body = await response.json();
+    if (!Array.isArray(body.models) || typeof body.defaultModel !== 'string'
+      || !Array.isArray(body.reasoningEfforts) || typeof body.defaultReasoningEffort !== 'string') {
+      throw new ServiceError('服务返回了无效的面试配置', 502, 'invalid_interview_options');
+    }
+    return body;
+  }
+
+  async startSession(supplement, model, reasoningEffort) {
     await this.stopSession();
     const response = await this.request('/v1/sessions', {
       method: 'POST',
-      body: JSON.stringify({ supplement }),
+      body: JSON.stringify({ supplement, model, reasoningEffort }),
     });
     const body = await response.json();
     this.sessionId = body.id;

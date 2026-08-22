@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('interviewAPI', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   updateConfig: (patch) => ipcRenderer.invoke('config:update', patch),
   testServer: () => ipcRenderer.invoke('server:test'),
+  getOptions: () => ipcRenderer.invoke('options:get'),
   activate: (code) => ipcRenderer.invoke('student:activate', code),
   deactivate: () => ipcRenderer.invoke('student:deactivate'),
   importSupplement: () => ipcRenderer.invoke('supplement:import'),

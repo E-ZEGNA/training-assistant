@@ -65,7 +65,7 @@ main { max-width: 700px; margin: 0 auto; padding: 24px 24px 34px; }
 .field > span:first-child { font-size: 12px; font-weight: 650; }
 .full-width { width: 100%; }
 .input-action-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-input, textarea {
+input, textarea, select {
   width: 100%;
   border: 1px solid #cfd7d3;
   border-radius: 7px;
@@ -76,7 +76,7 @@ input, textarea {
 }
 input { height: 40px; padding: 0 12px; font-size: 13px; }
 textarea { min-height: 112px; max-height: 220px; resize: vertical; padding: 11px 12px 26px; line-height: 1.55; font-size: 13px; }
-input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(23, 117, 88, 0.12); }
+input:focus, textarea:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(23, 117, 88, 0.12); }
 input::placeholder, textarea::placeholder { color: #99a39e; }
 .field-meta { align-self: flex-end; margin-top: -27px; margin-right: 9px; padding: 2px 4px; background: var(--surface); color: #87918c; font-size: 10px; pointer-events: none; }
 .field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -126,6 +126,8 @@ input::placeholder, textarea::placeholder { color: #99a39e; }
 .switch input:checked + span::after { transform: translateX(16px); }
 .hotkey-button { min-width: 92px; height: 32px; padding: 0 10px; border: 1px solid #cfd7d3; background: white; color: #39433f; font-family: Consolas, monospace; font-size: 11px; }
 .hotkey-button.recording { border-color: var(--amber); background: var(--amber-soft); color: var(--amber); }
+.model-select, .reasoning-select { width: min(230px, 52vw); height: 34px; padding: 0 30px 0 10px; font-size: 11px; text-overflow: ellipsis; }
+.model-select:disabled, .reasoning-select:disabled { color: #87918c; background: #f0f3f1; }
 
 .meeting-toolbar { height: 48px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
 .live-state { display: flex; align-items: center; gap: 10px; min-width: 0; }

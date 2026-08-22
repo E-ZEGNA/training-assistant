@@ -62,6 +62,18 @@
           <div class="setting-label"><i data-lucide="mic"></i><div><strong>麦克风</strong><span>学员语音</span></div></div>
           <label class="switch"><input id="microphone-enabled" type="checkbox" /><span></span></label>
         </div>
+        <div class="setting-row">
+          <div class="setting-label"><i data-lucide="cpu"></i><div><strong>回答模型</strong><span>本场固定</span></div></div>
+          <select id="model-select" class="model-select" aria-label="回答模型" disabled>
+            <option value="">激活后加载</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><i data-lucide="brain-circuit"></i><div><strong>思考深度</strong><span>质量与速度</span></div></div>
+          <select id="reasoning-select" class="reasoning-select" aria-label="思考深度" disabled>
+            <option value="">激活后加载</option>
+          </select>
+        </div>
         <div class="setting-row hotkey-row">
           <div class="setting-label"><i data-lucide="command"></i><div><strong>生成答案</strong><span>全局快捷键</span></div></div>
           <button id="hotkey-recorder" class="hotkey-button">Ctrl + 1</button>
